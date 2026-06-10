@@ -352,6 +352,7 @@
     <string name="bridge_profile_incident_safe_desc">Самый осторожный режим для облав, сбоев связи или временно опасной среды.</string>
     <string name="bridge_relay_only_title">Только через relay</string>
     <string name="bridge_relay_only_desc">Когда режим включён, ADA перестаёт использовать live iroh для direct-сообщений и разрешает только мост, mailbox или локальную очередь.</string>
+    <string name="bridge_relay_only_profile_forced">Принудительно задано профилем подключения. Переключите на «Авто» или «Обычный», чтобы изменить вручную.</string>
     <string name="bridge_runtime_title">Текущее состояние runtime</string>
     <string name="bridge_runtime_profile_label">Профиль: %1$s</string>
     <string name="bridge_runtime_stack_label">Транспортный стек: %1$s</string>
