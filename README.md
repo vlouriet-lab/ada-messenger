@@ -26,13 +26,27 @@ formal third-party security audit; use it accordingly.
 
 ## Install
 
-Pre-built binaries are on the [Releases](../../releases) page.
+### Стабильные релизы
 
-**Android** — download `ada-messenger-*.apk`, enable *Install unknown apps* for
-your browser/file manager, and open the APK.
+[<img src="https://img.shields.io/badge/Android_APK-Скачать-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Скачать APK">](https://github.com/vlouriet-lab/ada-messenger/releases/latest)
+[<img src="https://img.shields.io/badge/Windows_Installer-Скачать-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Скачать Windows Installer">](https://github.com/vlouriet-lab/ada-messenger/releases/latest)
 
-**Windows** — download `ADA-Messenger-Setup-*.exe` and run it. SmartScreen may
-show a one-time *More info -> Run anyway* prompt (the build is not EV-code-signed).
+Стабильные сборки публикуются на странице [Releases](../../releases) при каждом теге версии.
+
+### Последняя сборка из `main` (nightly)
+
+Актуальные артефакты каждого коммита доступны без входа в GitHub:
+
+| Платформа | Ссылка |
+|-----------|--------|
+| Android (подписанный APK) | [ada-messenger-signed.zip](https://nightly.link/vlouriet-lab/ada-messenger/workflows/build-android/main/ada-messenger-signed.zip) |
+| Windows (NSIS installer) | [ada-messenger-windows-installer.zip](https://nightly.link/vlouriet-lab/ada-messenger/workflows/build-windows/main/ada-messenger-windows-installer.zip) |
+
+> Nightly-сборки не проходят дополнительного QA. Для production использования берите релиз.
+
+**Android** — скачайте APK, включите *Установку из неизвестных источников* для браузера или файлового менеджера, откройте файл.
+
+**Windows** — запустите `ADA-Messenger-Setup-*.exe`. SmartScreen может показать предупреждение *Подробнее → Выполнить в любом случае* (сборка без EV code-signing сертификата).
 
 See [docs/INSTALL.md](docs/INSTALL.md) for details.
 
