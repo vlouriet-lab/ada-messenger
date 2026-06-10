@@ -240,4 +240,5 @@
     <string name="conn_yellow">Connecté — retards possibles</string>
     <string name="conn_orange">Limité — appels indisponibles</string>
     <string name="conn_red">Pas de connexion</string>
+    <string name="bridge_relay_only_profile_forced">Imposé par le profil de connexion. Passez en mode Auto ou Normal pour modifier manuellement.</string>
 </resources>

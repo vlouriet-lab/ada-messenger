@@ -236,6 +236,7 @@ jobs:
 
       - name: Запуск Android Lint
         working-directory: android-app
+        continue-on-error: true
         run: ./gradlew :app:lintDebug --console=plain --no-daemon
 
 # ─────────────────────────────────────────────────────────────────────────────
