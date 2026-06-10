@@ -1,10 +1,15 @@
 # ADA Messenger
 
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/vlouriet-lab/ada-messenger?include_prereleases&label=release)](https://github.com/vlouriet-lab/ada-messenger/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/vlouriet-lab/ada-messenger/build-android.yml?branch=main&label=android%20CI)](https://github.com/vlouriet-lab/ada-messenger/actions)
+[![Platform](https://img.shields.io/badge/platform-Android%20%7C%20Windows-brightgreen)](https://github.com/vlouriet-lab/ada-messenger/releases)
+
 A decentralized, end-to-end encrypted, censorship-resistant messenger. It runs
 peer-to-peer over an [iroh](https://www.iroh.computer/) QUIC transport, with a
 shared Rust security core used by both the Android app and the Windows desktop app.
 
-> Status: active development — current version **0.3**.
+> **Status:** active development — beta. Not yet externally audited; use accordingly.
 
 ## What it does
 
@@ -13,7 +18,7 @@ shared Rust security core used by both the Android app and the Windows desktop a
 - **Works on hostile networks** — optional bridge and store-and-forward mailbox fallback when direct P2P is blocked.
 - **Messaging** — groups, replies, reactions, edits, disappearing messages, file transfer.
 - **Calls** — 1:1 and group voice/video over WebRTC.
-- **Cross-device** — Android ⇄ Windows account sync.
+- **Cross-device** — Android and Windows account sync.
 - **Incognito chats** — per-contact ephemeral identities.
 
 This is independent software under active development. It has not undergone a
@@ -24,27 +29,16 @@ formal third-party security audit; use it accordingly.
 Pre-built binaries are on the [Releases](../../releases) page.
 
 **Android** — download `ada-messenger-*.apk`, enable *Install unknown apps* for
-your browser/file manager, and open the APK. (Or `adb install -r ada-messenger-debug.apk`.)
+your browser/file manager, and open the APK.
 
 **Windows** — download `ADA-Messenger-Setup-*.exe` and run it. SmartScreen may
-show a one-time *More info → Run anyway* prompt (the build is not EV-code-signed).
+show a one-time *More info -> Run anyway* prompt (the build is not EV-code-signed).
 
 See [docs/INSTALL.md](docs/INSTALL.md) for details.
 
 ## Build from source
 
 Full instructions: [docs/BUILDING.md](docs/BUILDING.md).
-
-```bash
-# Android APK
-cd android-app
-./gradlew :app:assembleQuasiRelease   # or assembleDebug
-```
-
-```powershell
-# Windows installer (ada_core.dll + Compose Desktop app + NSIS installer)
-./build-installer-windows.ps1 -SkipSigning
-```
 
 Prerequisites: [Rust](https://rustup.rs/) (stable), JDK 17, Android SDK + NDK r26b
 (for Android), and [NSIS](https://nsis.sourceforge.io/) (for the Windows installer).
@@ -53,13 +47,17 @@ Prerequisites: [Rust](https://rustup.rs/) (stable), JDK 17, Android SDK + NDK r2
 
 | Path | Description |
 |------|-------------|
-| `ada-core/` | Rust security & networking core (P2P, crypto, transport). Exposes a C/JNI FFI. |
-| `android-app/app/` | Android application (Kotlin + Jetpack Compose). |
-| `android-app/desktopApp/` | Windows/desktop application (Compose Multiplatform). |
-| `cf-workers/` | Optional Cloudflare Workers (bridge & manifest infrastructure). |
-| `scripts/` | Operator tooling (manifest signing, bootstrap secrets). |
-| `docs/audits/` | Internal security audits and test results. |
-| `.github/workflows/` | CI: build, test, release. |
+| ada-core/ | Rust security and networking core. Exposes a C/JNI FFI. |
+| android-app/app/ | Android application (Kotlin + Jetpack Compose). |
+| android-app/desktopApp/ | Windows/desktop application (Compose Multiplatform). |
+| cf-workers/ | Optional Cloudflare Workers (bridge and manifest infrastructure). |
+| scripts/ | Operator tooling (manifest signing, bootstrap secrets). |
+| docs/audits/ | Internal security audits and test results. |
+| .github/workflows/ | CI: build, test, release. |
+
+## Changelog and Roadmap
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes and [ROADMAP.md](ROADMAP.md) for planned features.
 
 ## Contributing
 
