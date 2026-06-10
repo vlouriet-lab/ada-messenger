@@ -103,13 +103,10 @@ jobs:
           ls -lh android-app/app/src/main/jniLibs/**/*.so
 
       # Декодируем keystore из секрета — для подписи quasiRelease APK.
-      # Если секрет не задан (форк, PR от внешнего контрибьютора), шаг пропускается.
       - name: Декодирование keystore
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
         run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android-app/ada-release-key.jks
 
       - name: Запись local.properties для подписи
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
         run: |
           cat > android-app/local.properties << 'EOF'
           sdk.dir=$ANDROID_SDK_ROOT
