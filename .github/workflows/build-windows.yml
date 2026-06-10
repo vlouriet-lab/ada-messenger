@@ -42,8 +42,11 @@ jobs:
 
       # Флаг -SkipSigning: подпись code-signing сертификатом не нужна в CI.
       # Используется фича `desktop` (без android_logger) — корректно компилируется на Windows.
+      # CMAKE_POLICY_VERSION_MINIMUM=3.5 нужен для audiopus_sys на CMake 4.x (runner 2026).
       - name: Сборка инсталлятора (без подписи)
         shell: pwsh
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: ./build-installer-windows.ps1 -SkipSigning
 
       - name: Загрузка инсталлятора как артефакт
