@@ -1,0 +1,47 @@
+name: Запрос функции
+description: Предложите новую функцию или улучшение
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо за идею! Опишите её максимально подробно.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Какую проблему решает эта функция?
+      description: Опишите ситуацию, в которой вам не хватает этой функции.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Предлагаемое решение
+      description: Как, по-вашему, должна работать эта функция?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Платформа
+      options:
+        - Android
+        - Windows
+        - Оба
+        - Не важно
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Альтернативы, которые вы рассматривали
+      description: Есть ли другие способы решить задачу?
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Дополнительный контекст

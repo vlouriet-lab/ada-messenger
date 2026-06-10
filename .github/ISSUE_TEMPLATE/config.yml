@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Вопросы по безопасности
+    url: https://github.com/vlouriet-lab/ada-messenger/blob/main/SECURITY.md
+    about: Пожалуйста, не сообщайте об уязвимостях через Issues. Читайте SECURITY.md.

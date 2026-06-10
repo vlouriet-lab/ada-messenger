@@ -1,0 +1,62 @@
+name: Сообщение об ошибке
+description: Сообщите о баге в ADA Messenger
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо за сообщение! Пожалуйста, заполните форму как можно подробнее.
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Платформа
+      options:
+        - Android
+        - Windows
+        - Оба
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Версия ADA Messenger
+      description: Найдите в Настройки → О приложении
+      placeholder: "например: 0.4.0-beta"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Версия ОС
+      placeholder: "Android 14 / Windows 11 24H2"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Описание проблемы
+      description: Что происходит? Что должно происходить?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Шаги для воспроизведения
+      placeholder: |
+        1. Открыть чат с контактом
+        2. Нажать кнопку вызова
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Логи (необязательно)
+      description: Вставьте logcat / журнал приложения если есть
+      render: text
