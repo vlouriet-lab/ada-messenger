@@ -57,3 +57,9 @@ Reference issues with `#123` where applicable.
 
 Use the GitHub issue templates. For **security vulnerabilities**, do **not** open
 a public issue — follow [SECURITY.md](SECURITY.md).
+
+## License of contributions
+
+By submitting a contribution you agree that it is licensed under the project's
+[GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0), the same terms that
+cover the rest of the codebase.
