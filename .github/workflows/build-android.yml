@@ -101,12 +101,12 @@ jobs:
       - name: Build debug APK
         working-directory: android-app
         run: |
-          ./gradlew assembleDebug --info
+          ./gradlew assembleDebug --console=plain --no-daemon
 
-      - name: Build release APK (unsigned)
+      - name: Build quasiRelease APK (unsigned, for artifact)
         working-directory: android-app
         run: |
-          ./gradlew assembleRelease --info
+          ./gradlew assembleQuasiRelease -Pada.skipNativeBuild=false --console=plain --no-daemon
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -114,11 +114,11 @@ jobs:
           name: ada-messenger-debug
           path: android-app/app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Upload release APK
+      - name: Upload quasiRelease APK (unsigned)
         uses: actions/upload-artifact@v4
         with:
-          name: ada-messenger-release-unsigned
-          path: android-app/app/build/outputs/apk/release/app-release-unsigned.apk
+          name: ada-messenger-quasirelease-unsigned
+          path: android-app/app/build/outputs/apk/quasiRelease/*.apk
 
   test-core:
     name: Test Rust Core
@@ -205,38 +205,17 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
 
-      - name: Create Release Notes
-        run: |
-          cat > RELEASE_NOTES.md << 'EOF'
-          # ADA Messenger Release ${{ github.ref_name }}
-          
-          ## Changes
-          - See git log for detailed commits
-          
-          ## Artifacts
-          - `ada-messenger-debug.apk` — Debug build for testing
-          - `ada-messenger-release-unsigned.apk` — Release build (requires signing)
-          
-          ## Installation
-          ```bash
-          adb install -r ada-messenger-debug.apk
-          ```
-          
-          ## Build System
-          - Rust core: ada-core (v0.1.0)
-          - Android: Kotlin + Compose
-          - Supported ABIs: arm64-v8a, armeabi-v7a, x86_64
-          EOF
-
-      - name: GitHub Release
+      - name: GitHub Release (CI builds — unsigned debug only)
         uses: softprops/action-gh-release@v1
         with:
           files: |
             ada-messenger-debug/ada-messenger-debug.apk
-            ada-messenger-release-unsigned/ada-messenger-release-unsigned.apk
-          body_path: RELEASE_NOTES.md
-          draft: false
-          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }}
+          body: |
+            > **Note**: This is an automatically built **unsigned debug APK** from CI.
+            > For the signed production APK + Windows installer, trigger the
+            > [Release workflow](../../actions/workflows/release.yml) from the Actions tab.
+          draft: true
+          prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

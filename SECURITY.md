@@ -37,3 +37,24 @@ This repository must never contain real secrets. Signing keystores
 excluded via `.gitignore`. Release signing keys are stored only as encrypted
 **GitHub Actions secrets** (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
 `ANDROID_KEY_PASSWORD`).
+
+## GitHub Actions secrets required for releases
+
+To enable the automated [release workflow](.github/workflows/release.yml) to
+build and publish **signed** releases, configure the following secrets in
+**Settings → Secrets and variables → Actions** of your GitHub repository:
+
+| Secret name | What it contains |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | The `ada-release-key.jks` file, base64-encoded (`base64 -w0 ada-release-key.jks`) |
+| `ANDROID_KEYSTORE_PASSWORD` | Keystore (store) password |
+| `ANDROID_KEY_PASSWORD` | Key password (for PKCS12 equals the store password) |
+
+**The key alias is `ada-key`** — it is hardcoded in the workflow and matches
+the keystore created for this project. Do not change it without updating the
+workflow accordingly.
+
+These secrets are never printed in logs. The keystore file decoded from
+`ANDROID_KEYSTORE_BASE64` is written to a temporary path inside the runner
+and is not persisted anywhere.
+
