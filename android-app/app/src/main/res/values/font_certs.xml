@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Google Fonts provider certificate for runtime font download -->
+    <array name="com_google_android_gms_fonts_certs">
+        <item>@array/com_google_android_gms_fonts_certs_dev</item>
+        <item>@array/com_google_android_gms_fonts_certs_prod</item>
+    </array>
+
+    <string-array name="com_google_android_gms_fonts_certs_dev">
+        <item>
+            MIIEqDCCA5CgAwIBAgIJANWFuGx90071MA0GCSqGSIb3DQEBBAUAMIGUMQswCQYDVQQGEwJVUzETMBEGA1UECBMKQ2FsaWZvcm5pYTEWMBQGA1UEBxMNU2FuIEZyYW5jaXNjbzETMBEGA1UEChMKR29vZ2xlIEluYzEUMBIGA1UECxMLRW5naW5lZXJpbmcxFTATBgNVBAMTDGZha2Vkb21haW4uY29tMB4XDTE2MDIyNjAwMDAwMFoXDTI2MDIyMzAwMDAwMFowgZQxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpDYWxpZm9ybmlhMRYwFAYDVQQHEw1TYW4gRnJhbmNpc2NvMRMwEQYDVQQKEwpHb29nbGUgSW5jMRQwEgYDVQQLEwtFbmdpbmVlcmluZzEVMBMGA1UEAxMMZmFrZWRvbWFpbi5jb20wggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC0hDqMN28eYK3YyqDPfdb1/M8bMGJBIBuL0YQf9jXDHD3HNsFhKuvkTqhxLb70YzHF8qVQ8Mv8YpWMgYR9EBWGpGvA9xqjB7C3wXMbcVVRiQ5IkVdNH9JvFfhvCQqoJJNEPalyWqKjL7tJhJ0tOMaJV4TRhM5g2Hq0GJZiMcMr9E3RbKlHF2E
+        </item>
+    </string-array>
+
+    <string-array name="com_google_android_gms_fonts_certs_prod">
+        <item>
+            MIIEQzCCAyugAwIBAgIJAMLgh0ZkSjCNMA0GCSqGSIb3DQEBBAUAMHQxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpDYWxpZm9ybmlhMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtHb29nbGUgSW5jLjEQMA4GA1UECxMHQW5kcm9pZDEQMA4GA1UEAxMHQW5kcm9pZDAeFw0wODA4MjEyMzEzMzRaFw0zNjAxMDcyMzEzMzRaMHQxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpDYWxpZm9ybmlhMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRQwEgYDVQQKEwtHb29nbGUgSW5jLjEQMA4GA1UECxMHQW5kcm9pZDEQMA4GA1UEAxMHQW5kcm9pZDCCASAwDQYJKoZIhvcNAQEBBQADggENADCCAQgCggEBANbOLggKv+IxTdGNs8/TGFy0PTP6DHThvbbR24kT9ixcOd9W+EaBPWW+wPPkQxByC7Dd3hqjcnLbdQ7+B+ZvzbrUepOeNuFkZs2bR5KYkDmGSj5GWFU8Y9dVvE6VSCL71Rld0iQEVBBCISWIqE+9w2TtRnKRDm6VBFKsBPdE7HtGXjFfMXGPPqFq3EWKM1BEOl4UhX6M9M7fqWd4zfvH3O1VSmTn7PaSIq7g8YjKwqkZbM3GrfjjpB3MjWzOXNDpV1p3ILqv/jU5pLhq0tBHe7mBb8wT01cQZBpJFM+PCVJzm9E3rHe4X/MjDKFY7MBbnIjrB7X
+        </item>
+    </string-array>
+</resources>

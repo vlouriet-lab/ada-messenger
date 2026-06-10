@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ADA Messenger</string>
+
+    <!-- Common buttons -->
+    <string name="button_back">Atrás</string>
+    <string name="button_next">Siguiente</string>
+    <string name="button_cancel">Cancelar</string>
+    <string name="button_close">Cerrar</string>
+    <string name="button_clear">Borrar</string>
+    <string name="button_confirm">Confirmar</string>
+    <string name="button_login">Iniciar sesión</string>
+
+    <!-- Notifications / Service -->
+    <string name="notification_default_message">Nuevo mensaje</string>
+    <string name="notification_incoming_video_call">Videollamada entrante</string>
+    <string name="notification_incoming_audio_call">Llamada entrante</string>
+    <string name="notification_channel_messages">Mensajes</string>
+    <string name="notification_channel_messages_desc">Notificaciones de nuevos mensajes</string>
+    <string name="notification_channel_calls">Llamadas entrantes</string>
+    <string name="notification_channel_calls_desc">Notificaciones de llamadas entrantes</string>
+    <string name="notification_app_locked_title">ADA está bloqueado</string>
+    <string name="notification_app_locked_text">Abre la app para recibir mensajes</string>
+
+    <!-- Errors -->
+    <string name="error_message_too_long">Mensaje demasiado largo (máx. %d caracteres)</string>
+    <string name="error_send_group_message_failed">No se pudo enviar el mensaje al grupo.</string>
+    <string name="error_send_message_no_key_exchange">No se pudo enviar el mensaje. Primero intercambie códigos QR con el contacto.</string>
+    <string name="error_group_full">El grupo está lleno (máximo %d miembros)</string>
+    <string name="error_add_member_failed">No se pudo agregar al miembro. Quizás el grupo está lleno.</string>
+    <string name="error_profile_creation_failed">No se pudo crear el perfil. Inténtelo de nuevo.</string>
+    <string name="error_profile_recovery_failed">No se pudo recuperar el perfil.</string>
+    <string name="error_pattern_invalid">Patrón incorrecto. Inténtelo de nuevo.</string>
+    <string name="error_unlock_failed">Error de desbloqueo. Ingrese su patrón.</string>
+    <string name="error_file_transfer_group_not_supported">El envío de archivos a grupos aún no es compatible</string>
+    <string name="error_file_too_large">Archivo demasiado grande (máximo 50 GB)</string>
+    <string name="error_file_prepare_failed">No se pudo preparar el archivo para enviarlo</string>
+    <string name="error_video_call_group_size">Videollamadas disponibles para grupos de hasta %d miembros</string>
+    <string name="error_pattern_too_many_attempts">Demasiados intentos. Espere %d segundos.</string>
+    <string name="error_pattern_incorrect_attempt">Patrón incorrecto (intento %d de 3). </string>
+    <string name="error_pattern_wrong_cell_count">Seleccione exactamente 16 celdas</string>
+    <string name="error_pattern_mismatch">El patrón o los colores no coinciden. Inténtelo de nuevo.</string>
+    <string name="error_pattern_mismatch_hint">Repita exactamente su patrón, incluyendo los colores.</string>
+    <string name="error_pin_too_many_attempts">Demasiados intentos. Espere </string>
+    <string name="error_pin_incorrect_attempt">PIN incorrecto (intento %d de 3)</string>
+
+    <!-- Message previews -->
+    <string name="message_preview_outgoing_call">📞 Llamada saliente</string>
+    <string name="message_preview_incoming_call">📞 Llamada entrante</string>
+    <string name="message_preview_group_invite">👥 Invitación al grupo: </string>
+
+    <!-- Battery dialog -->
+    <string name="battery_dialog_title">Funcionamiento en segundo plano</string>
+    <string name="battery_dialog_text">Para recibir mensajes y llamadas cuando la app está minimizada, desactive la optimización de batería para ADA Messenger.\n\nEsto no afecta el consumo de batería — ADA solo funciona cuando hay una conexión P2P activa.</string>
+    <string name="battery_dialog_allow">Permitir</string>
+    <string name="battery_dialog_later">Más tarde</string>
+
+    <!-- Avatar -->
+    <string name="avatar_dialog_title">Elegir avatar</string>
+
+    <!-- Call screen -->
+    <string name="call_screen_incoming_audio_call">Llamada de audio entrante</string>
+    <string name="call_action_reject">Rechazar</string>
+    <string name="call_action_answer">Contestar</string>
+    <string name="call_state_connecting">Conectando…</string>
+    <string name="call_state_ringing">Sonando…</string>
+    <string name="call_state_initiating">Llamando…</string>
+    <string name="call_state_ringing_short">Sonando…</string>
+    <string name="call_action_unmute_mic">Activar mic.</string>
+    <string name="call_action_mute_mic">Silenciar</string>
+    <string name="call_action_camera_on">Cámara activa</string>
+    <string name="call_action_camera_off">Cámara apag.</string>
+    <string name="call_action_flip">Voltear</string>
+    <string name="call_action_stop_screen_share">Parar</string>
+    <string name="call_action_start_screen_share">Pantalla</string>
+    <string name="call_action_minimize">Minimizar</string>
+    <string name="call_action_hangup">Colgar</string>
+    <string name="call_action_unmute_short">Activar</string>
+    <string name="call_action_speakerphone_on">Altavoz</string>
+    <string name="call_action_speakerphone_off">Auricular</string>
+    <string name="call_unavailable_network">Las llamadas de voz y video no estan disponibles en la ruta de red actual.</string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_slide1_title">Cifrado de extremo a extremo</string>
+    <string name="onboarding_slide1_desc">Todos los mensajes están protegidos por X3DH + Double Ratchet.\nNadie excepto usted y el destinatario puede leerlos.</string>
+    <string name="onboarding_slide2_title">Red punto a punto</string>
+    <string name="onboarding_slide2_desc">Sin servidores centrales. Sus datos se transmiten\ndirectamente entre dispositivos a través de una red P2P mesh.</string>
+    <string name="onboarding_slide3_title">Privacidad total</string>
+    <string name="onboarding_slide3_desc">Sin teléfono, sin email. Su identidad se define\nsolo por un patrón visual — recuérdelo e inicie sesión.</string>
+    <string name="onboarding_profile_desc">Su identidad se almacena solo en este dispositivo.\nSin servidores ni cuentas.</string>
+    <string name="onboarding_display_name_label">Nombre para mostrar</string>
+    <string name="onboarding_profile_creating">Creando…</string>
+    <string name="onboarding_profile_button">Crear perfil</string>
+
+    <!-- Chat screen -->
+    <string name="chat_action_audio_call">Llamada de audio</string>
+    <string name="chat_action_video_call">Videollamada</string>
+    <string name="chat_action_more">Más</string>
+    <string name="chat_action_incognito">Iniciar chat incógnito</string>
+    <string name="chat_action_clear_history">Borrar chat</string>
+    <string name="chat_status_connecting">Estableciendo conexión…</string>
+    <string name="chat_reply_you">Tú</string>
+    <string name="chat_action_attach">Adjuntar</string>
+    <string name="chat_action_photo">Foto</string>
+    <string name="chat_action_file">Archivo</string>
+    <string name="chat_recording_indicator">● Grabando </string>
+    <string name="chat_input_hint">Mensaje</string>
+    <string name="chat_action_send">Enviar</string>
+    <string name="chat_action_voice_message">Mensaje de voz</string>
+
+    <!-- Message actions dialog -->
+    <string name="dialog_message_title">Mensaje</string>
+    <string name="message_action_reply">Responder</string>
+    <string name="message_action_delete_for_me">Eliminar para mí</string>
+    <string name="message_action_delete_for_all">Eliminar para todos</string>
+
+    <!-- Clear chat dialog -->
+    <string name="dialog_clear_confirm_title">¿Borrar chat?</string>
+    <string name="dialog_clear_confirm_text">Todo el historial de mensajes se eliminará solo para usted.</string>
+    <string name="dialog_clear_confirm_button">Borrar</string>
+
+    <!-- Incognito dialog -->
+    <string name="dialog_incognito_title">Chat incógnito</string>
+    <string name="dialog_incognito_text">Muestre este QR a su contacto.\nLa sesión no estará vinculada a su ID principal.</string>
+
+    <!-- Add contact / open link -->
+    <string name="dialog_add_contact_title">¿Agregar contacto?</string>
+    <string name="dialog_open_link_title">¿Abrir enlace?</string>
+    <string name="dialog_add_contact_button">Agregar</string>
+    <string name="dialog_open_link_button">Abrir</string>
+
+    <!-- Media messages -->
+    <string name="audio_action_pause">Pausa</string>
+    <string name="audio_action_play">Reproducir</string>
+    <string name="message_type_voice">Voz</string>
+    <string name="message_type_video">Video</string>
+    <string name="video_action_watch">Ver</string>
+
+    <!-- Group chat -->
+    <string name="group_action_add_member">Agregar miembro</string>
+    <string name="group_member_slots">Lugares disponibles: </string>
+    <string name="group_contacts_header">Sus contactos:</string>
+    <string name="group_manual_entry">O ingrese el Peer ID manualmente:</string>
+    <string name="group_manual_input_hint">Ingrese el Peer ID del miembro:</string>
+    <string name="group_action_group_call">Llamada grupal</string>
+    <string name="group_menu_members">Miembros</string>
+    <string name="group_action_leave">Abandonar grupo</string>
+    <string name="group_member_count">miembros</string>
+    <string name="group_info_members_header">Miembros:</string>
+    <string name="group_member_role_owner">Propietario</string>
+    <string name="group_member_role_admin">Administrador</string>
+    <string name="dialog_leave_confirm_title">¿Abandonar grupo?</string>
+    <string name="dialog_leave_confirm_text">Ya no recibirá mensajes de este grupo.</string>
+    <string name="dialog_leave_confirm_button">Abandonar</string>
+    <string name="status_loading">Cargando…</string>
+
+    <!-- Date separators -->
+    <string name="date_today">Hoy</string>
+    <string name="date_yesterday">Ayer</string>
+
+    <!-- Pattern login -->
+    <string name="pattern_login_title">Ingrese su patrón</string>
+    <string name="pattern_login_subtitle">Reproduzca el patrón que creó durante el registro.</string>
+    <string name="pattern_login_forgot">Olvidé mi patrón</string>
+    <string name="lockout_countdown_prefix">Espere </string>
+
+    <!-- Pattern registration -->
+    <string name="pattern_register_step1_title">Cree un patrón</string>
+    <string name="pattern_register_step1_subtitle">Seleccione exactamente 16 celdas.\nToque una celda de nuevo para cambiar su color (3 colores disponibles).\nEsta es su contraseña visual — recuérdela.</string>
+    <string name="pattern_register_step1_hint">Toque: establecer (color 1) → color 2 → color 3 → eliminar.</string>
+    <string name="pattern_register_step2_title">Confirme el patrón</string>
+    <string name="pattern_register_step2_subtitle">Dibuje el mismo patrón con los mismos colores.</string>
+
+    <!-- Profile creation -->
+    <string name="profile_name_title">Su nombre</string>
+    <string name="profile_name_subtitle">Este nombre será visible para sus contactos.\nPuede cambiarlo más adelante.</string>
+    <string name="profile_name_hint">Nombre / apodo</string>
+    <string name="profile_creating_title">Creando perfil…</string>
+    <string name="profile_creating_subtitle">Esto tomará unos segundos</string>
+    <string name="profile_created_title">¡Perfil creado!</string>
+
+    <!-- PIN login -->
+    <string name="pin_login_prompt">Ingrese el código PIN</string>
+    <string name="pin_login_use_pattern">Iniciar sesión con patrón</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Ajustes</string>
+    <string name="settings_section_avatar">Avatar</string>
+    <string name="settings_my_avatar">Mi avatar</string>
+    <string name="settings_my_avatar_desc">Se muestra junto a su perfil</string>
+    <string name="settings_section_lock">Bloqueo de la app</string>
+    <string name="settings_pin_set">PIN establecido</string>
+    <string name="settings_pin">Código PIN</string>
+    <string name="settings_pin_set_desc">Toque para cambiar o desactivar</string>
+    <string name="settings_pin_unset_desc">Inicio rápido sin patrón</string>
+    <string name="settings_pin_disable">Desactivar PIN</string>
+    <string name="settings_pin_need_pattern">Inicie sesión con patrón para activar el PIN</string>
+    <string name="settings_section_notifications">Notificaciones</string>
+    <string name="settings_notif_content">Mostrar contenido</string>
+    <string name="settings_notif_content_desc">Nombre del remitente y texto en notificaciones (desactive para mayor privacidad)</string>
+    <string name="settings_section_clean_pin">Señuelo (PIN limpio)</string>
+    <string name="settings_clean_pin_active">PIN limpio activo</string>
+    <string name="settings_clean_pin">PIN limpio</string>
+    <string name="settings_clean_pin_desc">Abre un mensajero vacío sin mensajes bajo coacción</string>
+    <string name="settings_clean_pin_disable">Desactivar PIN limpio</string>
+    <string name="settings_section_kill_pin">Código de destrucción</string>
+    <string name="settings_kill_pin_active">Código de destrucción activo</string>
+    <string name="settings_kill_pin">Código de destrucción</string>
+    <string name="settings_kill_pin_desc">Elimina irreversiblemente todos los datos de la app al ingresar este PIN</string>
+    <string name="settings_kill_pin_disable">Desactivar código de destrucción</string>
+    <string name="settings_section_appearance">Apariencia</string>
+    <string name="settings_theme">Tema</string>
+    <string name="settings_theme_system">Sistema</string>
+    <string name="settings_theme_light">Claro</string>
+    <string name="settings_theme_dark">Oscuro</string>
+    <string name="settings_theme_dialog_title">Elegir tema</string>
+    <string name="settings_dynamic_color">Colores dinámicos</string>
+    <string name="settings_dynamic_color_desc">Material You — colores del fondo de pantalla</string>
+    <string name="settings_section_language">Idioma</string>
+    <string name="settings_language">Idioma de la app</string>
+    <string name="settings_language_system">Sistema</string>
+    <string name="settings_language_dialog_title">Elegir idioma</string>
+    <string name="settings_section_about">Acerca de</string>
+    <string name="settings_about_desc">Mensajero P2P cifrado\nVersión 1.0.0</string>
+    <string name="settings_pin_dialog_set">Establecer PIN</string>
+    <string name="settings_pin_dialog_change">Cambiar PIN</string>
+    <string name="settings_pin_dialog_disable">Desactivar PIN</string>
+    <string name="settings_pin_enter_current">Ingrese el PIN actual para confirmar:</string>
+    <string name="settings_pin_label_current">PIN actual</string>
+    <string name="settings_pin_label_new">Nuevo PIN (4 dígitos)</string>
+    <string name="settings_pin_label_repeat">Repetir PIN</string>
+    <string name="settings_pin_label_4digits">PIN (4 dígitos)</string>
+    <string name="button_save">Guardar</string>
+
+    <!-- Calls -->
+    <string name="calls_no_active">No hay llamadas activas</string>
+
+    <!-- Connection status bar -->
+    <string name="conn_green">Conectado</string>
+    <string name="conn_yellow">Conectado — posibles retrasos</string>
+    <string name="conn_orange">Limitado — llamadas no disponibles</string>
+    <string name="conn_red">Sin conexión</string>
+</resources>

@@ -1,0 +1,521 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ADA Messenger</string>
+
+    
+    <string name="button_back">Назад</string>
+    <string name="button_next">Далее</string>
+    <string name="button_cancel">Отмена</string>
+    <string name="button_close">Закрыть</string>
+    <string name="button_clear">Очистить</string>
+    <string name="button_confirm">Подтвердить</string>
+    <string name="button_login">Войти</string>
+    <string name="button_export">Экспорт</string>
+    <string name="button_copy">Копировать</string>
+
+    
+    <string name="notification_default_message">Новое сообщение</string>
+    <string name="notification_incoming_video_call">Входящий видеозвонок</string>
+    <string name="notification_incoming_audio_call">Входящий звонок</string>
+    <string name="notification_channel_messages">Сообщения</string>
+    <string name="notification_channel_messages_desc">Уведомления о новых сообщениях</string>
+    <string name="notification_channel_calls">Входящие звонки</string>
+    <string name="notification_channel_calls_desc">Уведомления о входящих звонках</string>
+    <string name="notification_app_locked_title">ADA заблокировано</string>
+    <string name="notification_app_locked_text">Откройте приложение для получения сообщений</string>
+
+    
+    <string name="error_message_too_long">Сообщение слишком длинное (макс. %d символов)</string>
+    <string name="error_send_group_message_failed">Не удалось отправить сообщение в группу.</string>
+    <string name="error_send_message_no_key_exchange">Не удалось отправить сообщение. Сначала обменяйтесь QR-кодами с контактом.</string>
+    <string name="error_group_full">Группа заполнена (максимум %d участников)</string>
+    <string name="error_add_member_failed">Не удалось добавить участника. Возможно, группа заполнена.</string>
+    <string name="error_profile_creation_failed">Не удалось создать профиль. Попробуйте ещё раз.</string>
+    <string name="error_profile_recovery_failed">Не удалось восстановить профиль.</string>
+    <string name="error_pattern_invalid">Неверный узор. Попробуйте ещё раз.</string>
+    <string name="error_unlock_failed">Ошибка разблокировки. Введите узор.</string>
+    <string name="error_file_transfer_group_not_supported">Отправка файлов в группы пока не поддерживается</string>
+    <string name="error_file_too_large">Файл слишком большой (максимум 50 ГБ)</string>
+    <string name="error_file_prepare_failed">Не удалось подготовить файл к отправке</string>
+    <string name="error_video_call_group_size">Видеоконференция доступна для групп до %d участников</string>
+    <string name="error_pattern_too_many_attempts">Слишком много попыток. Подождите %d секунд.</string>
+    <string name="error_pattern_incorrect_attempt">Неверный узор (попытка %d из 3).</string>
+    <string name="error_pattern_wrong_cell_count">Выберите ровно 16 ячеек</string>
+    <string name="error_pattern_mismatch">Узор или цвета не совпадают. Попробуйте ещё раз.</string>
+    <string name="error_pattern_mismatch_hint">Повторите ваш узор в точности, включая цвета.</string>
+    <string name="error_pin_too_many_attempts">Слишком много попыток. Подождите</string>
+    <string name="error_pin_incorrect_attempt">Неверный PIN (попытка %d из 3)</string>
+
+    
+    <string name="message_preview_outgoing_call">📞 Исходящий звонок</string>
+    <string name="message_preview_incoming_call">📞 Входящий звонок</string>
+    <string name="message_preview_group_invite">👥 Приглашение в группу:</string>
+
+    
+    <string name="battery_dialog_title">Работа в фоне</string>
+    <string name="battery_dialog_text">"Чтобы получать сообщения и звонки, когда приложение свёрнуто, отключите оптимизацию батареи для ADA Messenger.
+
+Это не влияет на расход заряда — ADA работает только когда есть активное P2P-соединение."</string>
+    <string name="battery_dialog_allow">Разрешить</string>
+    <string name="battery_dialog_later">Позже</string>
+
+    
+    <string name="avatar_dialog_title">Выберите аватарку</string>
+
+    
+    <string name="call_screen_incoming_audio_call">Входящий аудиозвонок</string>
+    <string name="call_action_reject">Отклонить</string>
+    <string name="call_action_answer">Ответить</string>
+    <string name="call_state_connecting">Соединение…</string>
+    <string name="call_state_ringing">Гудки…</string>
+    <string name="call_state_initiating">Вызов…</string>
+    <string name="call_state_ringing_short">Гудки…</string>
+    <string name="call_action_unmute_mic">Вкл. мик.</string>
+    <string name="call_action_mute_mic">Выкл. мик.</string>
+    <string name="call_action_camera_on">Камера вкл.</string>
+    <string name="call_action_camera_off">Выкл. кам.</string>
+    <string name="call_action_flip">Перевер.</string>
+    <string name="call_action_stop_screen_share">Стоп</string>
+    <string name="call_action_start_screen_share">Экран</string>
+    <string name="call_action_share_link">Поделиться ссылкой</string>
+    <string name="call_share_link_chooser_title">Поделиться ссылкой на звонок</string>
+    <string name="call_action_minimize">Свернуть</string>
+    <string name="call_action_hangup">Завершить</string>
+    <string name="call_action_unmute_short">Включить</string>
+    <string name="call_action_speakerphone_on">Динамик</string>
+    <string name="call_action_speakerphone_off">Трубка</string>
+    <string name="call_unavailable_network">Голосовые и видеозвонки недоступны на текущем сетевом маршруте.</string>
+
+    
+    <string name="onboarding_slide1_title">Сквозное шифрование</string>
+    <string name="onboarding_slide1_desc">"Все сообщения защищены протоколом X3DH + Double Ratchet.
+Никто, кроме вас и собеседника, не может их прочитать."</string>
+    <string name="onboarding_slide2_title">Одноранговая сеть</string>
+    <string name="onboarding_slide2_desc">"Нет центральных серверов. Ваши данные передаются
+напрямую между устройствами через P2P mesh-сеть."</string>
+    <string name="onboarding_slide3_title">Полная приватность</string>
+    <string name="onboarding_slide3_desc">"Ни телефона, ни email. Ваша личность определяется
+только визуальным паттерном — запомнили и вошли."</string>
+    <string name="onboarding_profile_desc">"Ваша личность хранится только на этом устройстве.
+Никаких серверов и аккаунтов."</string>
+    <string name="onboarding_display_name_label">Отображаемое имя</string>
+    <string name="onboarding_profile_creating">Создание…</string>
+    <string name="onboarding_profile_button">Создать профиль</string>
+
+    
+    <string name="chat_action_audio_call">Аудиозвонок</string>
+    <string name="chat_action_video_call">Видеозвонок</string>
+    <string name="chat_action_more">Ещё</string>
+    <string name="chat_action_rename_contact">Имя контакта</string>
+    <string name="chat_action_incognito">Начать инкогнито-чат</string>
+    <string name="chat_action_clear_history">Очистить чат</string>
+    <string name="action_chat_background">Фон чата</string>
+    <string name="chat_status_connecting">Устанавливается соединение…</string>
+    <string name="chat_reply_you">Вы</string>
+    <string name="chat_action_attach">Прикрепить</string>
+    <string name="chat_action_photo">Фото</string>
+    <string name="chat_action_video_attach">Видео</string>
+    <string name="chat_action_file">Файл</string>
+    <string name="chat_recording_indicator">● Запись</string>
+    <string name="chat_input_hint">Сообщение</string>
+    <string name="chat_action_send">Отправить</string>
+    <string name="chat_action_voice_message">Голосовое сообщение</string>
+    <string name="chat_image_saved">Изображение сохранено</string>
+    <string name="chat_image_save_failed">Не удалось сохранить изображение</string>
+
+    
+    <string name="dialog_message_title">Сообщение</string>
+    <string name="message_action_edit">Редактировать</string>
+    <string name="message_action_reply">Ответить</string>
+    <string name="message_action_delete_for_me">Удалить у себя</string>
+    <string name="message_action_delete_for_all">Удалить у всех</string>
+    <string name="message_edited_suffix">изм.</string>
+    <string name="chat_editing_label">Редактирование</string>
+    <string name="error_edit_message_failed">Не удалось изменить сообщение</string>
+
+    
+    <string name="dialog_clear_confirm_title">Очистить чат?</string>
+    <string name="dialog_clear_confirm_text">Вся история сообщений будет удалена только у вас.</string>
+    <string name="dialog_clear_confirm_button">Очистить</string>
+
+    
+    <string name="dialog_incognito_title">Инкогнито-чат</string>
+    <string name="dialog_incognito_text">"Покажите этот QR собеседнику.
+Сессия не будет привязана к вашему основному ID."</string>
+
+    
+    <string name="dialog_add_contact_title">Добавить контакт?</string>
+    <string name="dialog_open_link_title">Открыть ссылку?</string>
+    <string name="dialog_add_contact_button">Добавить</string>
+    <string name="dialog_contact_alias_title">Имя контакта</string>
+    <string name="dialog_contact_alias_label">Локальное имя</string>
+    <string name="dialog_contact_alias_hint">Оставьте поле пустым, чтобы использовать имя из профиля контакта.</string>
+    <string name="dialog_open_link_button">Открыть</string>
+
+    
+    <string name="audio_action_pause">Пауза</string>
+    <string name="audio_action_play">Играть</string>
+    <string name="message_type_voice">Голосовое сообщение</string>
+    <string name="message_type_video">Видео</string>
+    <string name="conversation_preview_no_messages">Нет сообщений</string>
+    <string name="conversation_preview_message">Сообщение</string>
+    <string name="conversation_preview_call">Звонок</string>
+    <string name="conversation_preview_group_audio_call">Групповой звонок</string>
+    <string name="conversation_preview_group_video_call">Групповой видеозвонок</string>
+    <string name="conversation_preview_group_invite">Приглашение в группу</string>
+    <string name="video_action_watch">Смотреть</string>
+
+    
+    <string name="group_action_add_member">Добавить участника</string>
+    <string name="group_member_slots">Свободных мест:</string>
+    <string name="group_contacts_header">Ваши контакты:</string>
+    <string name="group_manual_entry">Или введите Peer ID вручную:</string>
+    <string name="group_manual_input_hint">Введите Peer ID участника:</string>
+    <string name="group_action_group_call">Групповой звонок</string>
+    <string name="group_menu_members">Участники</string>
+    <string name="group_action_leave">Покинуть группу</string>
+    <string name="group_member_count">участников</string>
+    <string name="group_info_members_header">Участники:</string>
+    <string name="group_member_role_owner">Владелец</string>
+    <string name="group_member_role_admin">Админ</string>
+    <string name="dialog_leave_confirm_title">Покинуть группу?</string>
+    <string name="dialog_leave_confirm_text">Вы больше не будете получать сообщения этой группы.</string>
+    <string name="dialog_leave_confirm_button">Покинуть</string>
+    <string name="status_loading">Загрузка…</string>
+
+    
+    <string name="date_today">Сегодня</string>
+    <string name="date_yesterday">Вчера</string>
+
+    
+    <string name="pattern_login_title">Введите ваш узор</string>
+    <string name="pattern_login_subtitle">Воспроизведите узор, который вы придумали при регистрации.</string>
+    <string name="pattern_login_forgot">Я забыл(а) узор</string>
+    <string name="lockout_countdown_prefix">Подождите</string>
+
+    
+    <string name="pattern_register_step1_title">Придумайте узор</string>
+    <string name="pattern_register_step1_subtitle">"Выберите ровно 16 ячеек.
+Тапните ячейку ещё раз, чтобы сменить цвет (3 цвета на выбор).
+Это ваш визуальный пароль — запомните его."</string>
+    <string name="pattern_register_step1_hint">Тап: поставить (цвет 1) → цвет 2 → цвет 3 → убрать.</string>
+    <string name="pattern_register_step2_title">Подтвердите узор</string>
+    <string name="pattern_register_step2_subtitle">Нарисуйте тот же узор с теми же цветами.</string>
+
+    
+    <string name="profile_name_title">Ваше имя</string>
+    <string name="profile_name_subtitle">"Это имя увидят ваши собеседники.
+Вы сможете изменить его позже."</string>
+    <string name="profile_name_hint">Имя / ник</string>
+    <string name="profile_creating_title">Создаём профиль…</string>
+    <string name="profile_creating_subtitle">Это займёт несколько секунд</string>
+    <string name="profile_created_title">Профиль создан!</string>
+
+    
+    <string name="pin_login_prompt">Введите PIN-код</string>
+    <string name="pin_login_use_pattern">Войти по узору</string>
+
+    
+    <string name="settings_title">Настройки</string>
+    <string name="settings_section_avatar">Аватарка</string>
+    <string name="settings_my_avatar">Моя аватарка</string>
+    <string name="settings_my_avatar_desc">Отображается рядом с вашим профилем</string>
+    <string name="settings_section_lock">Блокировка приложения</string>
+    <string name="settings_pin_set">PIN-код установлен</string>
+    <string name="settings_pin">PIN-код</string>
+    <string name="settings_pin_set_desc">Нажмите для смены или отключения</string>
+    <string name="settings_pin_unset_desc">Быстрый вход без узора</string>
+    <string name="settings_pin_disable">Отключить PIN</string>
+    <string name="settings_pin_need_pattern">Войдите по узору для активации PIN</string>
+    <string name="settings_section_notifications">Уведомления</string>
+    <string name="settings_notif_content">Показывать содержимое</string>
+    <string name="settings_notif_content_desc">Имя отправителя и текст в уведомлениях (выключите для повышенной приватности)</string>
+    <string name="settings_screenshots">Разрешить скриншоты</string>
+    <string name="settings_screenshots_desc">Разрешить скриншоты и показ в недавних приложениях</string>
+    <string name="settings_section_data_retention">Данные и хранение</string>
+    <string name="settings_auto_wipe">Само-уничтожение (неактивность)</string>
+    <string name="settings_auto_wipe_desc">Удаляет все данные, если приложение не открывали указанное число дней (0 — отключить)</string>
+    <string name="settings_cache_limit">Макс. размер кэша (МБ)</string>
+    <string name="settings_cache_limit_desc">Ограничение кэша медиавложений</string>
+    <string name="settings_attachment_age">Срок хранения вложений (дней)</string>
+    <string name="settings_attachment_age_desc">Удаляет старые медиафайлы из кэша</string>
+    
+    <string name="settings_section_clean_pin">Ловушка (чистый PIN)</string>
+    <string name="settings_clean_pin_active">Чистый PIN активен</string>
+    <string name="settings_clean_pin">Чистый PIN</string>
+    <string name="settings_clean_pin_desc">Открывает пустой мессенджер без переписки при принуждении</string>
+    <string name="settings_clean_pin_disable">Отключить чистый PIN</string>
+    <string name="settings_section_kill_pin">Код уничтожения данных</string>
+    <string name="settings_kill_pin_active">Код уничтожения активен</string>
+    <string name="settings_kill_pin">Код уничтожения</string>
+    <string name="settings_kill_pin_desc">Необратимо удаляет все данные приложения при вводе этого PIN</string>
+    <string name="settings_kill_pin_disable">Отключить код уничтожения</string>
+    <string name="settings_section_appearance">Оформление</string>
+    <string name="settings_theme">Тема</string>
+    <string name="settings_theme_system">Системная</string>
+    <string name="settings_theme_light">Светлая</string>
+    <string name="settings_theme_dark">Тёмная</string>
+    <string name="settings_theme_dialog_title">Выберите тему</string>
+    <string name="settings_dynamic_color">Динамические цвета</string>
+    <string name="settings_dynamic_color_desc">Material You — цвета из обоев</string>
+    <string name="settings_section_language">Язык</string>
+    <string name="settings_language">Язык приложения</string>
+    <string name="settings_language_system">Системный</string>
+    <string name="settings_language_dialog_title">Выберите язык</string>
+    <string name="settings_section_storage">Хранилище</string>
+    <string name="settings_cache_label">Медиа-кэш</string>
+    <string name="settings_cache_desc">Кэшированные фото, видео и файлы</string>
+    <string name="settings_cache_clear">Очистить кэш</string>
+    <string name="settings_cache_cleared">Кэш очищен</string>
+    <string name="settings_cache_size">Занято %s</string>
+    <string name="settings_section_recovery">Восстановление</string>
+    <string name="settings_recovery_code">Показать recovery code</string>
+    <string name="settings_recovery_code_desc">Восстанавливает ту же identity на новом устройстве без истории чатов</string>
+    <string name="settings_recovery_export">Экспорт recovery bundle</string>
+    <string name="settings_recovery_export_desc">Зашифрованный backup с чатами, контактами и локальным session state для другого устройства</string>
+    <string name="settings_section_about">О приложении</string>
+    <string name="settings_about_desc">"Зашифрованный P2P мессенджер
+Версия 1.0.0"</string>
+    <string name="settings_pin_dialog_set">Установить PIN</string>
+    <string name="settings_pin_dialog_change">Изменить PIN</string>
+    <string name="settings_pin_dialog_disable">Отключить PIN</string>
+    <string name="settings_pin_enter_current">Введите текущий PIN для подтверждения:</string>
+    <string name="settings_pin_label_current">Текущий PIN</string>
+    <string name="settings_pin_label_new">Новый PIN (4 цифры)</string>
+    <string name="settings_pin_label_repeat">Повторите PIN</string>
+    <string name="settings_pin_label_4digits">PIN (4 цифры)</string>
+    <string name="button_save">Сохранить</string>
+
+    
+    <string name="notification_locked_title">ADA заблокировано</string>
+    <string name="notification_locked_text">Откройте приложение для получения сообщений</string>
+    <string name="notification_channel_messages_name">Сообщения</string>
+    <string name="notification_channel_calls_name">Входящие звонки</string>
+
+    
+    <string name="onboarding_create_profile_title">Создать профиль</string>
+
+    
+    <string name="pattern_login_lockout_seconds">Подождите %dс</string>
+    <string name="pattern_login_enter">Войти</string>
+
+    
+    <string name="pattern_register_step2_next">Подтвердить</string>
+    <string name="recovery_import_open_button">Восстановить аккаунт</string>
+
+    
+    <string name="profile_create_button">Создать профиль</string>
+
+    
+    <string name="pin_login_use_pattern_button">Войти по узору</string>
+
+    
+    <string name="calls_no_active">Нет активных звонков</string>
+
+    
+    <string name="bridge_title">Антицензура</string>
+    <string name="bridge_censorship_level">Уровень цензуры: %s</string>
+    <string name="bridge_level_none">Цензура не обнаружена</string>
+    <string name="bridge_level_light">Лёгкая — некоторые сайты могут быть заблокированы</string>
+    <string name="bridge_level_moderate">Средняя — многие сервисы заблокированы</string>
+    <string name="bridge_level_heavy">Сильная — большинство сервисов заблокировано</string>
+    <string name="bridge_level_extreme">Тотальная — работает глубокий анализ пакетов (DPI)</string>
+    <string name="bridge_level_unknown">Неизвестно</string>
+    <string name="bridge_recheck">Проверить</string>
+    <string name="bridge_mode_title">Режим подключения</string>
+    <string name="bridge_mode_auto">Авто</string>
+    <string name="bridge_mode_auto_desc">Автоматический выбор (рекомендуется)</string>
+    <string name="bridge_mode_none">Прямое</string>
+    <string name="bridge_mode_none_desc">Без маскировки, максимальная скорость</string>
+    <string name="bridge_mode_padding">Заполнение</string>
+    <string name="bridge_mode_padding_desc">Добавляется случайный шум в трафик</string>
+    <string name="bridge_mode_shaping">Маскировка</string>
+    <string name="bridge_mode_shaping_desc">Трафик выглядит как обычный веб-сёрфинг</string>
+    <string name="bridge_mode_websocket">WebSocket</string>
+    <string name="bridge_mode_websocket_desc">Туннелирует трафик через HTTPS</string>
+    <string name="bridge_mode_fronting">Домен-фронтинг</string>
+    <string name="bridge_mode_fronting_desc">Скрывает за CDN (напр. Cloudflare)</string>
+    <string name="bridge_profile_title">Профиль соединения</string>
+    <string name="bridge_profile_auto">Авто</string>
+    <string name="bridge_profile_auto_desc">Профиль по умолчанию. ADA сама подстраивает маршрутизацию под текущую сеть.</string>
+    <string name="bridge_profile_normal">Обычный</string>
+    <string name="bridge_profile_normal_desc">Самый быстрый режим для открытых сетей, где direct iroh разрешён.</string>
+    <string name="bridge_profile_mobile_saver">Экономия мобильной сети</string>
+    <string name="bridge_profile_mobile_saver_desc">Снижает фоновый polling для мобильного трафика и батареи.</string>
+    <string name="bridge_profile_censored_light">Лёгкая цензура</string>
+    <string name="bridge_profile_censored_light_desc">Оставляет direct-маршруты доступными, но активнее использует bridge fallback.</string>
+    <string name="bridge_profile_censored_heavy">Сильная цензура</string>
+    <string name="bridge_profile_censored_heavy_desc">Отключает direct live iroh и использует мост, mailbox или локальную очередь.</string>
+    <string name="bridge_profile_allowlist_only">Только белый список</string>
+    <string name="bridge_profile_allowlist_only_desc">HTTPS/mailbox-first поведение для сетей, где работают только разрешённые сайты.</string>
+    <string name="bridge_profile_incident_safe">Аварийный безопасный</string>
+    <string name="bridge_profile_incident_safe_desc">Самый осторожный режим для облав, сбоев связи или временно опасной среды.</string>
+    <string name="bridge_relay_only_title">Только через relay</string>
+    <string name="bridge_relay_only_desc">Когда режим включён, ADA перестаёт использовать live iroh для direct-сообщений и разрешает только мост, mailbox или локальную очередь.</string>
+    <string name="bridge_runtime_title">Текущее состояние runtime</string>
+    <string name="bridge_runtime_profile_label">Профиль: %1$s</string>
+    <string name="bridge_runtime_stack_label">Транспортный стек: %1$s</string>
+    <string name="bridge_runtime_stack_iroh_only">только iroh</string>
+    <string name="bridge_runtime_stack_iroh_bridge_mailbox">iroh + мост + mailbox</string>
+    <string name="bridge_runtime_visibility_label">Наблюдаемость маршрута</string>
+    <string name="bridge_runtime_visibility_iroh_live_or_offline_queue">Эта сборка различает live-доставку через iroh и локальную очередь, но не умеет честно отличать direct path от iroh relay.</string>
+    <string name="bridge_runtime_visibility_iroh_bridge_mailbox_or_offline_queue">Эта сборка различает live iroh, live-доставку через мост, bridge mailbox и локальную очередь.</string>
+    <string name="bridge_relay_only_scope_label">Поведение relay-only</string>
+    <string name="bridge_relay_only_scope_disabled">Когда режим выключен, live-доставка через iroh разрешена.</string>
+    <string name="bridge_relay_only_scope_queue_only">Когда режим включён, live-доставка через iroh отключается, а новые исходящие сообщения ставятся в локальную очередь до появления non-direct маршрута.</string>
+    <string name="bridge_relay_only_scope_bridge_or_mailbox_only">Когда режим включён, live-доставка через iroh отключена. Если доступны мост или mailbox, ADA использует их вместо direct-маршрута.</string>
+    <string name="bridge_last_outcome_label">Последний результат доставки</string>
+    <string name="bridge_last_outcome_none">Результат доставки ещё не зафиксирован.</string>
+    <string name="bridge_last_outcome_iroh_live">Сообщение отправлено через live iroh.</string>
+    <string name="bridge_last_outcome_bridge_websocket_tls">Сообщение отправлено через live WebSocket-мост.</string>
+    <string name="bridge_last_outcome_bridge_domain_front">Сообщение отправлено через live мост с домен-фронтингом.</string>
+    <string name="bridge_last_outcome_bridge_meek">Сообщение отправлено через live meek-подобный мост.</string>
+    <string name="bridge_last_outcome_bridge_obfs4">Сообщение отправлено через live obfs4-подобный мост.</string>
+    <string name="bridge_last_outcome_local_mesh">Сообщение отправлено через локальную mesh-сеть.</string>
+    <string name="bridge_last_outcome_mailbox_bridge">Сообщение принято bridge mailbox для последующей доставки.</string>
+    <string name="bridge_last_outcome_offline_queue">Сообщение поставлено в локальную очередь, потому что live-доставка не сработала.</string>
+    <string name="bridge_last_outcome_relay_only_deferred">Сообщение поставлено в локальную очередь, потому что включён relay-only.</string>
+    <string name="bridge_last_outcome_failed">Доставка завершилась ошибкой до постановки в очередь.</string>
+    <string name="bridge_listener_label">Bridge listener</string>
+    <string name="bridge_listener_connected">Подключён и слушает через %1$s.</string>
+    <string name="bridge_listener_disconnected">Активной bridge listener-сессии сейчас нет.</string>
+    <string name="bridge_mailbox_depth_label">Глубина mailbox: %1$d</string>
+    <string name="bridge_capability_calls_label">Возможность звонков</string>
+    <string name="bridge_capability_calls_available">Realtime-сигнализация звонков сейчас разрешена.</string>
+    <string name="bridge_capability_calls_unavailable">Звонки отключены для текущего censorship-safe маршрута.</string>
+    <string name="bridge_capability_attachments_label">Возможность вложений</string>
+    <string name="bridge_capability_attachments_available">Крупные вложения могут использовать direct iroh/blob маршрут.</string>
+    <string name="bridge_capability_attachments_limited">Крупные вложения ограничены. Текущий censorship-safe лимит: %1$s байт.</string>
+    <string name="bridge_manifest_label">Bridge manifest</string>
+    <string name="bridge_manifest_summary">Manifest v%1$s, мостов: %2$s, источник: %3$s.</string>
+    <string name="bridge_manifest_absent">Проверенный bridge manifest не загружен.</string>
+    <string name="bridge_manifest_import_title">Bootstrap manifest</string>
+    <string name="bridge_manifest_import_desc">Импортируйте подписанный bridge manifest из вставленного JSON, ada:// bridge-ссылки, файла или QR-кода. Если на устройстве ещё нет pinned manifest key, один раз добавьте доверенный Ed25519 public key при bootstrap.</string>
+    <string name="bridge_manifest_import_paste_button">Вставить ссылку или JSON</string>
+    <string name="bridge_manifest_import_file_button">Загрузить из файла</string>
+    <string name="bridge_manifest_import_qr_button">Сканировать QR manifest</string>
+    <string name="bridge_manifest_import_dialog_title">Импорт bridge manifest</string>
+    <string name="bridge_manifest_import_input_label">Подписанный manifest или ada://bridge-manifest ссылка</string>
+    <string name="bridge_manifest_import_input_hint">Вставьте SignedBridgeManifest JSON, https:// URL manifest или ada://bridge-manifest bootstrap-ссылку.</string>
+    <string name="bridge_manifest_import_key_label">Доверенный public key</string>
+    <string name="bridge_manifest_import_key_hint">Необязателен, если signer manifest уже pinned на этом устройстве. Иначе один раз вставьте 32-байтовый Ed25519 public key в hex.</string>
+    <string name="bridge_manifest_import_loaded_from">Загружено из: %1$s</string>
+    <string name="bridge_manifest_import_confirm">Импортировать manifest</string>
+    <string name="bridge_manifest_import_invalid">Ввод manifest не распознан. Используйте подписанный manifest JSON, https:// URL или ada://bridge-manifest ссылку.</string>
+    <string name="bridge_manifest_import_failed">Не удалось импортировать bridge manifest.</string>
+    <string name="bridge_manifest_import_failed_with_reason">Не удалось импортировать bridge manifest: %1$s</string>
+    <string name="bridge_manifest_import_read_failed">Не удалось прочитать выбранный manifest-файл.</string>
+    <string name="bridge_manifest_import_success">Bridge manifest импортирован из %1$s.</string>
+    <string name="bridge_manifest_import_source_manual">ручной ввод</string>
+    <string name="bridge_manifest_import_source_file">manifest-файл</string>
+    <string name="bridge_manifest_import_source_deeplink">bridge-ссылка</string>
+    <string name="bridge_manifest_import_source_qr">QR-импорт</string>
+    <string name="bridge_manifest_import_clean_unavailable">В чистом режиме импорт bridge manifest недоступен.</string>
+    <string name="bridge_runtime_unknown">Неизвестно</string>
+    <string name="bridge_bridges_title">Мосты</string>
+    <string name="bridge_no_bridges">Мосты не добавлены. Нажмите + чтобы добавить.</string>
+    <string name="bridge_status_online">Онлайн</string>
+    <string name="bridge_status_offline">Офлайн</string>
+    <string name="bridge_add_title">Добавить мост</string>
+    <string name="bridge_add_hint">Адрес моста</string>
+    <string name="bridge_add_example">"Вставьте bridge line, например:
+websocket ada-edge.example.workers.dev:443 fp=1111111111111111111111111111111111111111111111111111111111111111 host=ada-edge.example.workers.dev wire=json"</string>
+    <string name="bridge_add_button">Добавить</string>
+    <string name="bridge_add_success">Мост добавлен.</string>
+    <string name="bridge_add_failed">Bridge line отклонена.</string>
+    <string name="bridge_add_failed_with_reason">Bridge line отклонена: %1$s</string>
+    <string name="bridge_add_invalid">Bridge line пустая или слишком длинная.</string>
+    <string name="bridge_tip">Подсказка: Большинству пользователей не нужно менять эти настройки. Если вы в стране с интернет-цензурой, выберите режим «Авто» — приложение настроится само.</string>
+    <string name="recovery_password_label">Пароль recovery bundle</string>
+    <string name="recovery_password_hint">Используйте этот же пароль при импорте на новом устройстве (минимум 8 символов).</string>
+    <string name="recovery_export_dialog_title">Экспорт recovery bundle</string>
+    <string name="recovery_export_dialog_text">Будет создан зашифрованный backup с вашей identity, контактами, историей чатов и локальным session state. Медиа-кэш не включается. После импорта на новом устройстве введите исходный узор.</string>
+    <string name="recovery_export_saved">Recovery bundle экспортирован.</string>
+    <string name="recovery_export_failed">Не удалось экспортировать recovery bundle.</string>
+    <string name="recovery_code_dialog_title">Recovery code</string>
+    <string name="recovery_code_dialog_text">Сохраните этот код отдельно и офлайн. Он восстанавливает тот же peer ID на новом устройстве, но не переносит историю чатов. Для полного переноса с сообщениями экспортируйте recovery bundle.</string>
+    <string name="recovery_code_copied">Recovery code скопирован.</string>
+    <string name="recovery_import_title">Импорт recovery bundle</string>
+    <string name="recovery_import_subtitle">Выберите, откуда восстанавливать аккаунт: из зашифрованного recovery-файла или по recovery code.</string>
+    <string name="recovery_import_note">После импорта всё равно потребуется ввести исходный узор, чтобы открыть восстановленный аккаунт.</string>
+    <string name="recovery_import_tab_file">Recovery-файл</string>
+    <string name="recovery_import_tab_code">Recovery code</string>
+    <string name="recovery_import_file_note">Recovery-файл восстанавливает identity, чаты, контакты и локальный delivery/session state. Медиа-кэш не переносится.</string>
+    <string name="recovery_import_code_note">Recovery code восстанавливает только identity. История чатов и локальный кэш состояния не переносятся.</string>
+    <string name="recovery_import_pick_file">Выбрать recovery-файл</string>
+    <string name="recovery_import_selected_file">Выбран файл: %s</string>
+    <string name="recovery_import_unknown_file">неизвестно</string>
+    <string name="recovery_import_no_file">Recovery-файл ещё не выбран.</string>
+    <string name="recovery_import_code_label">Recovery code</string>
+    <string name="recovery_import_code_hint">Вставьте или введите код ровно в том виде, в котором вы его сохранили.</string>
+    <string name="recovery_import_display_name_label">Отображаемое имя</string>
+    <string name="recovery_import_display_name_hint">Позже его можно изменить после входа.</string>
+    <string name="recovery_import_confirm_button">Импортировать и продолжить</string>
+    <string name="recovery_import_code_confirm_button">Восстановить identity и продолжить</string>
+    <string name="recovery_import_failed">Не удалось импортировать recovery bundle.</string>
+
+    
+    <string name="conn_green">Подключено</string>
+    <string name="conn_yellow">Подключено — возможны задержки</string>
+    <string name="conn_orange">Ограниченное — звонки недоступны</string>
+    <string name="conn_red">Нет соединения</string>
+    <string name="conn_with_route">%1$s - %2$s</string>
+    <string name="conn_route_iroh_live">live iroh</string>
+    <string name="conn_route_bridge">мост</string>
+    <string name="conn_route_local_mesh">local mesh</string>
+    <string name="conn_route_mailbox">mailbox</string>
+    <string name="conn_route_offline_queue">очередь</string>
+    <string name="conn_route_relay_only_deferred">очередь relay-only</string>
+    <string name="conn_route_failed">ошибка</string>
+
+    <string name="peer_presence_live">в live iroh</string>
+    <string name="peer_presence_not_live">не в live iroh</string>
+
+    <string name="dialog_open_link_warning">Внимание: Открытие ссылки произойдет через ваш обычный интернет, что раскроет ваш IP-адрес сайту и в обход защищенных мостов.</string>
+    <!-- Main screen -->
+    <string name="nav_chats">Чаты</string>
+    <string name="nav_calls">Звонки</string>
+    <string name="cd_search">Поиск</string>
+    <string name="cd_my_qr">Мой QR</string>
+    <string name="cd_scan_qr">Сканировать QR</string>
+    <string name="cd_new_group">Новая группа</string>
+    <string name="cd_new_chat">Новый чат</string>
+    <string name="search_chats_hint">Поиск чатов…</string>
+    <string name="main_no_chats">Нет диалогов</string>
+    <string name="main_no_chats_hint">Нажмите + чтобы начать чат</string>
+    <string name="action_delete">Удалить</string>
+    <string name="dialog_delete_chat_title">Удалить чат?</string>
+    <string name="dialog_delete_chat_text">Чат с «%s» и все сообщения будут удалены с этого устройства.</string>
+    <string name="dialog_my_contact_title">Мой контакт</string>
+    <string name="dialog_my_contact_desc">Покажите этот QR собеседнику,\nчтобы он добавил вас как контакт.</string>
+    <string name="dialog_share_contact_link">Поделиться ссылкой</string>
+    <string name="dialog_share_contact_chooser">Поделиться контактом</string>
+    <string name="dialog_profile_not_loaded">Профиль ещё не загружен.</string>
+    <string name="dialog_new_chat_title">Новый чат</string>
+    <string name="dialog_new_chat_label">Ссылка ADA или JSON контакта</string>
+    <string name="dialog_new_chat_hint">Вставьте ada://s/… или ada://add-contact?…</string>
+    <string name="dialog_new_chat_scan_qr">Сканировать QR контакт</string>
+    <string name="dialog_new_chat_create_group">Создать группу</string>
+    <string name="dialog_new_chat_start">Начать чат</string>
+    <string name="error_clean_mode_no_contacts">В чистом режиме добавление контактов недоступно</string>
+    <string name="error_invalid_contact_link">Вставьте ссылку ADA или JSON контакта</string>
+
+    <!-- Settings -->
+    <string name="settings_section_communication">Связь</string>
+    <string name="settings_mesh_subtitle">Прямая связь по Bluetooth и Wi-Fi Direct без серверов</string>
+    <string name="settings_custom_bootstrap">Пользовательский bridge bootstrap</string>
+    <string name="settings_custom_bootstrap_desc">Добавьте свой URL bridge manifest и доверенный public key.</string>
+    <string name="settings_custom_bootstrap_configured">Manifest: %1$s</string>
+    <string name="settings_custom_bootstrap_dialog_title">Пользовательский bridge bootstrap</string>
+    <string name="settings_custom_bootstrap_dialog_desc">Используйте только если у вас есть доверенный manifest URL от своего оператора моста.</string>
+    <string name="settings_custom_bootstrap_url_label">Manifest URL</string>
+    <string name="settings_custom_bootstrap_url_hint">https://example.com/manifest.json</string>
+    <string name="settings_custom_bootstrap_key_label">Доверенный public key</string>
+    <string name="settings_custom_bootstrap_key_hint">32-байтовый Ed25519 public key в hex. Необязателен после pin signer.</string>
+    <string name="settings_custom_bootstrap_saved">Bridge manifest импортирован.</string>
+    <string name="settings_custom_bootstrap_cleared">Сохранённые bootstrap-поля очищены.</string>
+    <string name="settings_auto_wipe_dialog_hint">Введите число дней. 0 отключает авто-очистку.</string>
+    <string name="settings_auto_wipe_dialog_error">Введите 0 или положительное число дней</string>
+    <string name="error_pin_wrong">Неверный PIN</string>
+    <string name="error_pin_wrong_current">Неверный текущий PIN</string>
+    <string name="error_pin_no_pattern_data">Нет данных — войдите по узору</string></resources>

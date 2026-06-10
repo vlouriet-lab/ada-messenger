@@ -1,0 +1,1492 @@
+package com.ada.messenger.core
+
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.media.MediaPlayer
+import android.media.RingtoneManager
+import android.util.Log
+import com.ada.messenger.R
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import android.content.Intent
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+
+private const val TAG = "AdaCoreViewModel"
+
+// ── Data models ───────────────────────────────────────────────────────────────
+
+data class IncomingCallInfo(val callIdHex: String, val peerIdB64: String, val hasVideo: Boolean, val offerSdp: String = "", val displayName: String = "")
+data class ActiveCallInfo(val callIdHex: String, val peerIdB64: String, val hasVideo: Boolean, val isOutgoing: Boolean, val state: String, val displayName: String = "")
+data class TransferItem(val id: String, val peer: String, val fileName: String, val fileSize: Long, val mimeType: String, val progress: Float, val isOutbound: Boolean)
+data class BridgeStatus(val mode: String, val bridges: List<JSONObject>, val hasWorking: Boolean)
+
+class AdaCoreViewModel(private val appContext: Context) : ViewModel() {
+
+    companion object {
+        private const val IDENTITY_PREFS   = "ada_identity_v1"
+        private const val KEY_IDENTITY_TYPE = "identity_type"
+        private const val KEY_PEER_ID       = "peer_id"
+        private const val KEY_DISPLAY_NAME  = "display_name"
+        private const val KEY_AVATAR_INDEX  = "avatar_index"
+        const val IDENTITY_TYPE_PATTERN     = "pattern"
+        const val AVATAR_COUNT              = 20
+    }
+
+    /** App-lock manager (PIN + biometric unlock). */
+    val appLock = AppLockManager(appContext)
+
+    /**
+     * The raw pattern cells from the most recent successful login in this process.
+     * In-memory only — never persisted. Used by SettingsScreen to set up PIN/biometric
+     * without asking the user to re-enter the full pattern.
+     * Zeroed in [onCleared] and [lockApp] to minimise in-memory window.
+     */
+    @Volatile var lastPatternCells: ByteArray? = null
+
+    /** Lock for atomic zero-and-clear of [lastPatternCells]. */
+    private val cellsLock = Any()
+
+    // ── Clean-mode flag ────────────────────────────────────────────────────
+    /** True when the user entered the "clean" PIN — shows an empty app without real identity. */
+    private val _isCleanMode = MutableStateFlow(false)
+    val isCleanMode: StateFlow<Boolean> = _isCleanMode.asStateFlow()
+
+    // ── State ─────────────────────────────────────────────────────────────
+    private val _initialized = MutableStateFlow(false)
+    val initialized: StateFlow<Boolean> = _initialized.asStateFlow()
+
+    private val _myPeerId = MutableStateFlow<String?>(null)
+    val myPeerId: StateFlow<String?> = _myPeerId.asStateFlow()
+
+    private val _myDisplayName = MutableStateFlow<String?>(null)
+    val myDisplayName: StateFlow<String?> = _myDisplayName.asStateFlow()
+
+    private val _conversations = MutableStateFlow<List<ConversationItem>>(emptyList())
+    val conversations: StateFlow<List<ConversationItem>> = _conversations.asStateFlow()
+
+    private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
+    val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
+
+    // Phase 5: call state
+    private val _incomingCall = MutableStateFlow<IncomingCallInfo?>(null)
+    val incomingCall: StateFlow<IncomingCallInfo?> = _incomingCall.asStateFlow()
+
+    private val _activeCall = MutableStateFlow<ActiveCallInfo?>(null)
+    val activeCall: StateFlow<ActiveCallInfo?> = _activeCall.asStateFlow()
+
+    private val _isScreenSharing = MutableStateFlow(false)
+    val isScreenSharing: StateFlow<Boolean> = _isScreenSharing.asStateFlow()
+
+    // Phase 6: transfer state
+    private val _transfers = MutableStateFlow<List<TransferItem>>(emptyList())
+    val transfers: StateFlow<List<TransferItem>> = _transfers.asStateFlow()
+
+    /** Maps transfer_id_hex  →  absolute path of the saved file in the app cache. */
+    private val _savedFiles = MutableStateFlow<Map<String, String>>(emptyMap())
+    val savedFiles: StateFlow<Map<String, String>> = _savedFiles.asStateFlow()
+
+    /** transfer_id_hex of the voice message currently playing (null = none). */
+    private val _playingVoiceId = MutableStateFlow<String?>(null)
+    val playingVoiceId: StateFlow<String?> = _playingVoiceId.asStateFlow()
+
+    private var mediaPlayer: MediaPlayer? = null
+
+    // Connection status: true while iroh is establishing the first QUIC connection
+    // to a peer (up to 15 s). Reset when a message arrives or timer expires.
+    private val _irohConnecting = MutableStateFlow(false)
+    val irohConnecting: StateFlow<Boolean> = _irohConnecting.asStateFlow()
+
+    /** Tracks the latest connecting-reset timer so previous timers are cancelled on new send. */
+    private var connectingResetJob: kotlinx.coroutines.Job? = null
+
+    /** Non-null when a message send fails (e.g. missing X3DH bundle). Cleared by UI after shown. */
+    private val _sendError = MutableStateFlow<String?>(null)
+    val sendError: StateFlow<String?> = _sendError.asStateFlow()
+
+    fun clearSendError() { _sendError.value = null }
+
+    // Phase 7: bridge / censorship state
+    private val _bridgeStatus = MutableStateFlow<BridgeStatus?>(null)
+    val bridgeStatus: StateFlow<BridgeStatus?> = _bridgeStatus.asStateFlow()
+
+    private val _censorshipLevel = MutableStateFlow("None")
+    val censorshipLevel: StateFlow<String> = _censorshipLevel.asStateFlow()
+
+    // Group state
+    private val _groups = MutableStateFlow<List<GroupInfo>>(emptyList())
+    val groups: StateFlow<List<GroupInfo>> = _groups.asStateFlow()
+
+    private val _currentGroupInfo = MutableStateFlow<GroupInfo?>(null)
+    val currentGroupInfo: StateFlow<GroupInfo?> = _currentGroupInfo.asStateFlow()
+
+    /** Currently open conversation id (null = none selected) */
+    @Volatile private var activeConvId: String? = null
+
+    @Volatile private var core: AdaCore? = null
+
+    /** WebRTC media bridge — wired to the Rust signaling layer */
+    private var webRtc: WebRTCBridge? = null
+
+    /** Pending navigation from tapping a message notification → (convId, displayName). */
+    private val _pendingNavConv = MutableStateFlow<Pair<String, String>?>(null)
+    val pendingNavConv: StateFlow<Pair<String, String>?> = _pendingNavConv.asStateFlow()
+
+    fun openFromNotification(convId: String, convName: String) {
+        _pendingNavConv.value = Pair(convId, convName)
+    }
+
+    fun clearPendingNav() {
+        _pendingNavConv.value = null
+    }
+
+    /** Pending navigation from tapping an incoming-call notification → navigate to "call" screen. */
+    private val _pendingNavCall = MutableStateFlow<IncomingCallInfo?>(null)
+    val pendingNavCall: StateFlow<IncomingCallInfo?> = _pendingNavCall.asStateFlow()
+
+    fun openFromCallNotification(callIdHex: String, peerIdB64: String, hasVideo: Boolean) {
+        // Don't overwrite _incomingCall if it already has offerSdp for this call
+        if (_incomingCall.value?.callIdHex != callIdHex) {
+            _incomingCall.value = IncomingCallInfo(callIdHex, peerIdB64, hasVideo, offerSdp = "", displayName = peerDisplayName(peerIdB64))
+        }
+        _pendingNavCall.value = _incomingCall.value
+    }
+
+    fun clearPendingCallNav() {
+        _pendingNavCall.value = null
+    }
+
+    // ── Avatar preference ──────────────────────────────────────────────────
+
+    private val _myAvatarIndex = MutableStateFlow(0)
+    val myAvatarIndex: StateFlow<Int> = _myAvatarIndex.asStateFlow()
+
+    init {
+        val prefs = appContext.getSharedPreferences(IDENTITY_PREFS, android.content.Context.MODE_PRIVATE)
+        val stored = prefs.getInt(KEY_AVATAR_INDEX, -1)
+        if (stored == -1) {
+            // First launch — pick random avatar and persist it
+            val random = kotlin.random.Random.nextInt(AVATAR_COUNT)
+            prefs.edit().putInt(KEY_AVATAR_INDEX, random).apply()
+            _myAvatarIndex.value = random
+        } else {
+            _myAvatarIndex.value = stored
+        }
+    }
+
+    fun setMyAvatarIndex(index: Int) {
+        appContext.getSharedPreferences(IDENTITY_PREFS, android.content.Context.MODE_PRIVATE)
+            .edit().putInt(KEY_AVATAR_INDEX, index).apply()
+        _myAvatarIndex.value = index
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────
+
+    // ── Pattern auth state ─────────────────────────────────────────────────
+
+    /** True while Argon2id key derivation is running (can take 1-3 s on mobile). */
+    private val _patternLoading = MutableStateFlow(false)
+    val patternLoading: StateFlow<Boolean> = _patternLoading.asStateFlow()
+
+    /** Non-null when registration/verification fails with a message. */
+    private val _patternError = MutableStateFlow<String?>(null)
+    val patternError: StateFlow<String?> = _patternError.asStateFlow()
+
+    /**
+     * Register a new identity from the given visual pattern + nickname.
+     *
+     * Runs Argon2id key derivation on an IO dispatcher.
+     * On success sets [initialized] = true.
+     */
+    fun createFromPattern(cells: ByteArray, displayName: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _patternLoading.value = true
+            _patternError.value = null
+            try {
+                val dataDir = appContext.filesDir.absolutePath
+                val instance = AdaCore.createFromPattern(cells, displayName.trim(), dataDir)
+                if (instance == null) {
+                    _patternError.value = "Не удалось создать профиль. Попробуйте ещё раз."
+                    return@launch
+                }
+                core = instance
+                AdaCoreHolder.instance = instance  // D1: share with Service
+                webRtc = WebRTCBridge(appContext, this@AdaCoreViewModel)
+                _myPeerId.value = instance.getPeerId()
+                _myDisplayName.value = instance.getDisplayName()
+                // Save identity BEFORE setting initialized — process may be killed any moment
+                saveIdentityMeta(instance.getPeerId() ?: "", displayName.trim())
+                startAdaForegroundService(displayName.trim(), dataDir)
+                saveAdaCredentials(displayName.trim(), dataDir)
+                lastPatternCells = cells.copyOf()
+                _initialized.value = true
+                startEventPolling()
+                refreshConversations()
+                processPendingDeepLink()
+            } finally {
+                _patternLoading.value = false
+            }
+        }
+    }
+
+    /**
+     * Verify re-entered pattern against the existing identity on a new device.
+     *
+     * @return `true` if pattern matches; `false` otherwise.
+     */
+    suspend fun verifyPattern(cells: ByteArray): Boolean = withContext(Dispatchers.IO) {
+        _patternLoading.value = true
+        _patternError.value = null
+        try {
+            core?.verifyPattern(cells) ?: false
+        } finally {
+            _patternLoading.value = false
+        }
+    }
+
+    /** Contact card JSON for QR code generation. Null if not yet initialized. */
+    fun getContactCardJson(): String? = core?.getContactCardJson()
+
+    /**
+     * Open an incognito chat with [peerIdB64] and return a v3 QR contact card JSON.
+     *
+     * Generates a per-contact ephemeral X25519 IK so the resulting session cannot
+     * be correlated with standard chats by a passive observer.
+     *
+     * Show the returned JSON as a QR code.  Null on error (e.g. core not initialized).
+     */
+    fun createIncognitoChat(peerIdB64: String): String? {
+        return core?.createIncognitoChat(peerIdB64)
+    }
+
+    /**
+     * Parse a QR-scanned contact card JSON and store the peer's public bundle.
+     * Must be called before the first message to enable X3DH.
+     * @return true if the bundle was saved successfully.
+     */
+    fun addContactFromQr(contactCardJson: String): Boolean {
+        Log.i(TAG, "addContactFromQr len=${contactCardJson.length}")
+        val ok = core?.addContactFromJson(contactCardJson) ?: false
+        Log.i(TAG, "addContactFromQr result=$ok")
+        return ok
+    }
+
+    // ── Contact link sharing ─────────────────────────────────────────────
+
+    /** Returns an ada:// deep link encoding the local contact card. Null if not initialized. */
+    fun generateContactLink(): String? {
+        val json = core?.getContactCardJson() ?: return null
+        val encoded = android.util.Base64.encodeToString(
+            json.toByteArray(Charsets.UTF_8),
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP,
+        )
+        return "ada://add-contact?card=$encoded"
+    }
+
+    @Volatile
+    private var pendingDeepLinkCard: String? = null
+
+    /**
+     * Called when a contact deep link arrives (app launched by ada:// URI).
+     * If the user is already logged in, adds the contact immediately.
+     * Otherwise defers until the next successful login.
+     */
+    fun queueContactDeepLink(json: String) {
+        if (core != null) {
+            addContactFromDeepLink(json)
+        } else {
+            pendingDeepLinkCard = json
+        }
+    }
+
+    /** Parse [json] as a contact card, persist the bundle, and navigate to the new chat. */
+    fun addContactFromDeepLink(json: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val peerId = runCatching { org.json.JSONObject(json).getString("id") }.getOrNull()
+            // M-1 fix: skip if the conversation already exists to prevent duplicate
+            // navigation when the same ada:// link is tapped twice.
+            if (peerId != null) {
+                val convId = "d:$peerId"
+                val alreadyKnown = _conversations.value.any { it.id == convId }
+                if (alreadyKnown) {
+                    Log.d(TAG, "addContactFromDeepLink: contact ${convId.take(14)} already exists, skipping add")
+                    _pendingNavConv.value = Pair(convId, peerId.take(8) + "…")
+                    return@launch
+                }
+            }
+            val ok = core?.addContactFromJson(json) ?: false
+            Log.i(TAG, "addContactFromDeepLink ok=$ok")
+            if (ok) {
+                val name = runCatching {
+                    org.json.JSONObject(json).optString("name", "").ifBlank { null }
+                }.getOrNull()
+                if (peerId != null) {
+                    refreshConversations()
+                    _pendingNavConv.value = Pair("d:$peerId", name ?: peerId.take(8) + "…")
+                }
+            }
+        }
+    }
+
+    private fun processPendingDeepLink() {
+        val card = pendingDeepLinkCard ?: return
+        pendingDeepLinkCard = null
+        addContactFromDeepLink(card)
+    }
+
+    // ── Identity persistence helpers ──────────────────────────────────────
+
+    /** True if a pattern identity has been registered on this device. */
+    fun hasStoredIdentity(): Boolean =
+        appContext.getSharedPreferences(IDENTITY_PREFS, android.content.Context.MODE_PRIVATE)
+            .getString(KEY_IDENTITY_TYPE, null) != null
+
+    fun getStoredDisplayName(): String? =
+        appContext.getSharedPreferences(IDENTITY_PREFS, android.content.Context.MODE_PRIVATE)
+            .getString(KEY_DISPLAY_NAME, null)
+
+    private fun saveIdentityMeta(peerId: String, displayName: String) {
+        // Use commit() (synchronous) — guarantees disk write before process may be killed
+        appContext.getSharedPreferences(IDENTITY_PREFS, android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_IDENTITY_TYPE, IDENTITY_TYPE_PATTERN)
+            .putString(KEY_PEER_ID, peerId)
+            .putString(KEY_DISPLAY_NAME, displayName)
+            .commit()
+    }
+
+    /**
+     * Re-derive identity from pattern on subsequent launches (deterministic).
+     * Verifies peer_id matches the stored one before accepting login.
+     */
+    fun loginWithPattern(cells: ByteArray) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _patternLoading.value = true
+            _patternError.value = null
+            try {
+                val prefs = appContext.getSharedPreferences(IDENTITY_PREFS, android.content.Context.MODE_PRIVATE)
+                val storedPeerId   = prefs.getString(KEY_PEER_ID, null)
+                val storedName     = prefs.getString(KEY_DISPLAY_NAME, null) ?: ""
+                val dataDir        = appContext.filesDir.absolutePath
+                val instance       = AdaCore.createFromPattern(cells, storedName, dataDir)
+                if (instance == null) {
+                    _patternError.value = "Не удалось восстановить профиль."
+                    return@launch
+                }
+                val derivedPeerId = instance.getPeerId()
+                if (storedPeerId != null && derivedPeerId != storedPeerId) {
+                    instance.close()
+                    _patternError.value = "Неверный узор. Попробуйте ещё раз."
+                    return@launch
+                }
+                core = instance
+                AdaCoreHolder.instance = instance  // D1: share with Service
+                webRtc = WebRTCBridge(appContext, this@AdaCoreViewModel)
+                _myPeerId.value = derivedPeerId
+                _myDisplayName.value = instance.getDisplayName()
+                saveIdentityMeta(derivedPeerId ?: "", storedName)
+                startAdaForegroundService(storedName, dataDir)
+                saveAdaCredentials(storedName, dataDir)
+                lastPatternCells = cells.copyOf()
+                _initialized.value = true
+                startEventPolling()
+                refreshConversations()
+                processPendingDeepLink()
+            } finally {
+                _patternLoading.value = false
+            }
+        }
+    }
+
+    /**
+     * Quick-unlock path: login using pattern cells that were decrypted by PIN or biometric.
+     * Same as [loginWithPattern] but shows a generic error (the cells come pre-verified
+     * by PIN/biometric so they are expected to be correct).
+     */
+    fun loginWithCells(cells: ByteArray) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _patternLoading.value = true
+            _patternError.value = null
+            try {
+                val prefs = appContext.getSharedPreferences(IDENTITY_PREFS, android.content.Context.MODE_PRIVATE)
+                val storedPeerId = prefs.getString(KEY_PEER_ID, null)
+                val storedName   = prefs.getString(KEY_DISPLAY_NAME, null) ?: ""
+                val dataDir      = appContext.filesDir.absolutePath
+                val instance     = AdaCore.createFromPattern(cells, storedName, dataDir)
+                if (instance == null) {
+                    _patternError.value = "Ошибка разблокировки. Введите узор."
+                    return@launch
+                }
+                val derivedPeerId = instance.getPeerId()
+                if (storedPeerId != null && derivedPeerId != storedPeerId) {
+                    instance.close()
+                    _patternError.value = "Ошибка разблокировки. Введите узор."
+                    return@launch
+                }
+                core = instance
+                AdaCoreHolder.instance = instance
+                webRtc = WebRTCBridge(appContext, this@AdaCoreViewModel)
+                _myPeerId.value = derivedPeerId
+                _myDisplayName.value = instance.getDisplayName()
+                saveIdentityMeta(derivedPeerId ?: "", storedName)
+                startAdaForegroundService(storedName, dataDir)
+                saveAdaCredentials(storedName, dataDir)
+                lastPatternCells = cells.copyOf()
+                _initialized.value = true
+                startEventPolling()
+                refreshConversations()
+                processPendingDeepLink()
+            } finally {
+                _patternLoading.value = false
+            }
+        }
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────
+
+    fun create(displayName: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val dataDir = appContext.filesDir.absolutePath
+            val instance = AdaCore.create(displayName, dataDir) ?: return@launch
+            core = instance
+            AdaCoreHolder.instance = instance  // D1: share with Service
+            webRtc = WebRTCBridge(appContext, this@AdaCoreViewModel)
+            _myPeerId.value = instance.getPeerId()
+            _myDisplayName.value = instance.getDisplayName()
+            // Persist identity so subsequent launches route to pattern_login correctly.
+            saveIdentityMeta(instance.getPeerId() ?: "", displayName)
+            _initialized.value = true
+            // BUG-009 fix: start foreground service to keep P2P alive in background
+            startAdaForegroundService(displayName, dataDir)
+            // BUG-008 fix: save credentials so foreground service can restart after Doze kill
+            saveAdaCredentials(displayName, dataDir)
+            startEventPolling()
+            refreshConversations()
+            processPendingDeepLink()
+        }
+    }
+
+    // ── Conversations ─────────────────────────────────────────────────────
+
+    fun refreshConversations() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val json = core?.getConversationsJson() ?: return@launch
+            _conversations.value = parseConversations(json)
+        }
+    }
+
+    // ── Messages ──────────────────────────────────────────────────────────
+
+    fun openConversation(convId: String) {
+        activeConvId = convId
+        core?.markRead(convId)
+        refreshMessages(convId)
+    }
+
+    fun closeConversation() {
+        activeConvId = null
+        _messages.value = emptyList()
+    }
+
+    private fun refreshMessages(convId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val json = core?.getMessagesJson(convId, 100) ?: return@launch
+            _messages.value = parseMessages(json)
+        }
+    }
+
+    /** Publicly accessible wrapper — called from ChatScreen's backup refresh loop. */
+    fun refreshChatMessages(convId: String) = refreshMessages(convId)
+
+    fun sendText(convId: String, text: String) {
+        val myId = _myPeerId.value ?: return
+        // Q4 fix: guard against oversized messages before the optimistic UI update.
+        // Rust enforces 64 KB but the optimistic insert would flash then disappear.
+        if (text.length > 60_000) {
+            _sendError.value = "Сообщение слишком длинное (макс. 60 000 символов)"
+            return
+        }
+        // Optimistic update: show the message instantly before JNI confirms it
+        val optimistic = ChatMessage(
+            id = java.util.UUID.randomUUID().toString(),
+            sender = myId,
+            senderName = "",
+            text = text,
+            timestampMs = System.currentTimeMillis(),
+            isMine = true,
+            status = "sending",
+            kind = "text",
+        )
+        _messages.value = _messages.value + optimistic
+
+        viewModelScope.launch(Dispatchers.IO) {
+            if (convId.startsWith("g:")) {
+                val gid = convId.removePrefix("g:")
+                val ok = core?.sendGroupText(gid, text) ?: false
+                if (!ok) {
+                    _messages.value = _messages.value.filter { it.id != optimistic.id }
+                    _sendError.value = "Не удалось отправить сообщение в группу."
+                    return@launch
+                }
+                refreshMessages(convId)
+                refreshConversations()
+                return@launch
+            }
+            val peerIdB64 = if (convId.startsWith("d:")) {
+                convId.removePrefix("d:")
+            } else {
+                Log.w(TAG, "sendText: unknown convId format=$convId")
+                _messages.value = _messages.value.filter { it.id != optimistic.id }
+                return@launch
+            }
+            Log.d(TAG, "sendText to peer=${peerIdB64.take(12)}, len=${text.length}")
+            _irohConnecting.value = true
+            val ok = try {
+                core?.sendText(peerIdB64, text) ?: false
+            } catch (e: Exception) {
+                Log.e(TAG, "sendText JNI exception: ${e.message}", e)
+                false
+            }
+            if (!ok) {
+                // Rust rejected the send or JNI threw — remove the optimistic entry
+                // so the user doesn't see a ghost "sending" message stuck forever.
+                _messages.value = _messages.value.filter { it.id != optimistic.id }
+                _irohConnecting.value = false
+                _sendError.value =
+                    "Не удалось отправить сообщение. Сначала обменяйтесь QR-кодами с контактом."
+                return@launch
+            }
+            // Replace optimistic entry with real message from store
+            refreshMessages(convId)
+            refreshConversations()
+            // Auto-reset connecting indicator after CONNECT_TIMEOUT + buffer.
+            // Cancel any previous reset timer so rapid sends don't prematurely clear it.
+            connectingResetJob?.cancel()
+            connectingResetJob = viewModelScope.launch(Dispatchers.IO) {
+                delay(16_000L)
+                _irohConnecting.value = false
+            }
+        }
+    }
+
+    fun deleteMessage(convId: String, msgId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            core?.deleteMessage(msgId)
+            refreshMessages(convId)
+            refreshConversations()
+        }
+    }
+
+    fun deleteMessageForEveryone(convId: String, peerIdB64: String, msgId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            core?.deleteMessageForEveryone(peerIdB64, msgId)
+            refreshMessages(convId)
+            refreshConversations()
+        }
+    }
+
+    fun deleteConversation(convId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            core?.deleteConversation(convId)
+            _messages.value = emptyList()
+            refreshConversations()
+        }
+    }
+
+    /** Clear all messages in a conversation but keep the conversation in the list. */
+    fun clearConversation(convId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            core?.clearConversationMessages(convId)
+            _messages.value = emptyList()
+            refreshConversations()
+        }
+    }
+
+    /** Add a relay/bootstrap node at runtime (allows cross-network connectivity). */
+    fun addBootstrapNode(multiaddr: String): Boolean {
+        Log.i(TAG, "addBootstrapNode: $multiaddr")
+        return core?.addBootstrapNode(multiaddr) ?: false
+    }
+
+    // ── Calls (Phase 5) ───────────────────────────────────────────────────
+
+    fun startAudioCall(peerIdB64: String, onCallId: (String?) -> Unit) {
+        Log.i(TAG, "startAudioCall peer=${peerIdB64.take(12)}")
+        // Set immediately so CallScreen stays open while WebRTC creates the offer
+        _activeCall.value = ActiveCallInfo(
+            callIdHex = "", peerIdB64 = peerIdB64,
+            hasVideo = false, isOutgoing = true, state = "Initiating",
+            displayName = peerDisplayName(peerIdB64)
+        )
+        viewModelScope.launch(Dispatchers.IO) {
+            // Step 1: WebRTC creates real offer SDP
+            val offerSdp = try {
+                webRtc?.createOfferedCall(peerIdB64, hasVideo = false)
+                    ?: run {
+                        withContext(Dispatchers.Main) { _activeCall.value = null }
+                        withContext(Dispatchers.Main) { onCallId(null) }
+                        return@launch
+                    }
+            } catch (e: Exception) {
+                Log.e(TAG, "createOfferedCall failed: ${e.message}")
+                withContext(Dispatchers.Main) { _activeCall.value = null }
+                withContext(Dispatchers.Main) { onCallId(null) }
+                return@launch
+            }
+            // Step 2: Pass real offer to Rust, which sends it as Invite to peer
+            val callId = core?.callAudio(peerIdB64, offerSdp)
+            Log.i(TAG, "startAudioCall callAudio returned callId=${callId?.take(12) ?: "null"}")
+            if (callId != null) {
+                webRtc?.onOutgoingCallStarted(callId, peerIdB64, hasVideo = false)
+                // Ring timeout: auto-hangup if peer doesn't answer within 45s
+                viewModelScope.launch(Dispatchers.IO) {
+                    delay(45_000L)
+                    val cur = _activeCall.value
+                    if (cur?.callIdHex == callId && cur.state != "Active") {
+                        Log.i(TAG, "Ring timeout for $callId — auto-hangup")
+                        hangup(callId, peerIdB64)
+                    }
+                }
+            } else {
+                webRtc?.onCallEnded()
+                withContext(Dispatchers.Main) { _activeCall.value = null }
+            }
+            withContext(Dispatchers.Main) { onCallId(callId) }
+        }
+    }
+
+    fun startVideoCall(peerIdB64: String, onCallId: (String?) -> Unit) {
+        _activeCall.value = ActiveCallInfo(
+            callIdHex = "", peerIdB64 = peerIdB64,
+            hasVideo = true, isOutgoing = true, state = "Initiating",
+            displayName = peerDisplayName(peerIdB64)
+        )
+        viewModelScope.launch(Dispatchers.IO) {
+            val offerSdp = try {
+                webRtc?.createOfferedCall(peerIdB64, hasVideo = true)
+                    ?: run {
+                        withContext(Dispatchers.Main) { _activeCall.value = null }
+                        withContext(Dispatchers.Main) { onCallId(null) }
+                        return@launch
+                    }
+            } catch (e: Exception) {
+                Log.e(TAG, "createOfferedCall(video) failed: ${e.message}")
+                withContext(Dispatchers.Main) { _activeCall.value = null }
+                withContext(Dispatchers.Main) { onCallId(null) }
+                return@launch
+            }
+            val callId = core?.callVideo(peerIdB64, offerSdp)
+            if (callId != null) {
+                webRtc?.onOutgoingCallStarted(callId, peerIdB64, hasVideo = true)
+                // Ring timeout: auto-hangup if peer doesn't answer within 45s
+                viewModelScope.launch(Dispatchers.IO) {
+                    delay(45_000L)
+                    val cur = _activeCall.value
+                    if (cur?.callIdHex == callId && cur.state != "Active") {
+                        Log.i(TAG, "Ring timeout for $callId — auto-hangup")
+                        hangup(callId, peerIdB64)
+                    }
+                }
+            } else {
+                webRtc?.onCallEnded()
+                withContext(Dispatchers.Main) { _activeCall.value = null }
+            }
+            withContext(Dispatchers.Main) { onCallId(callId) }
+        }
+    }
+
+    fun answerCall(callIdHex: String, peerIdB64: String) {
+        val info = _incomingCall.value ?: return
+        val offerSdp = info.offerSdp
+        val hasVideo = info.hasVideo
+        // Show active call screen immediately (don't clear _incomingCall yet — cleared in sendRustAnswer)
+        _activeCall.value = ActiveCallInfo(
+            callIdHex = callIdHex, peerIdB64 = peerIdB64,
+            hasVideo = hasVideo, isOutgoing = false, state = "Connecting",
+            displayName = peerDisplayName(peerIdB64)
+        )
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                webRtc?.acceptIncomingCall(callIdHex, peerIdB64, offerSdp, hasVideo)
+                // sendRustAnswer called from within acceptIncomingCall
+            } catch (e: Exception) {
+                Log.e(TAG, "acceptIncomingCall failed: ${e.message}")
+                webRtc?.onCallEnded()
+                withContext(Dispatchers.Main) {
+                    _activeCall.value = null
+                    _incomingCall.value = null
+                }
+            }
+        }
+    }
+
+    /** Called by WebRTCBridge after generating the SDP answer — sends it to Rust for delivery. */
+    fun sendRustAnswer(callIdHex: String, peerIdB64: String, answerSdp: String) {
+        val hasVideo = _activeCall.value?.hasVideo ?: false
+        // Show Active immediately — don't block UI on network delivery (may take up to 30s).
+        _incomingCall.value = null
+        _activeCall.value = ActiveCallInfo(
+            callIdHex = callIdHex,
+            peerIdB64 = peerIdB64,
+            hasVideo = hasVideo,
+            isOutgoing = false,
+            state = "Active",
+            displayName = peerDisplayName(peerIdB64)
+        )
+        // Deliver answer to caller in background.
+        viewModelScope.launch(Dispatchers.IO) {
+            Log.d(TAG, "sendRustAnswer callId=${callIdHex.take(12)} sdp=${answerSdp.length}ch")
+            core?.answerCall(callIdHex, peerIdB64, answerSdp)
+        }
+    }
+
+    fun hangup(callIdHex: String, peerIdB64: String) {
+        // Null states immediately so the LaunchedEffect in CallScreen fires onFinish exactly once.
+        webRtc?.onCallEnded()
+        _activeCall.value = null
+        _incomingCall.value = null
+        _isScreenSharing.value = false
+        if (callIdHex.isNotEmpty()) {
+            viewModelScope.launch(Dispatchers.IO) {
+                core?.hangup(callIdHex, peerIdB64)
+            }
+        }
+    }
+
+    fun declineCall() {
+        val incoming = _incomingCall.value ?: return
+        // Null states immediately so LaunchedEffect fires onFinish exactly once.
+        webRtc?.onCallEnded()
+        _incomingCall.value = null
+        _activeCall.value = null
+        _isScreenSharing.value = false
+        viewModelScope.launch(Dispatchers.IO) {
+            core?.declineCall(incoming.callIdHex, incoming.peerIdB64)
+        }
+    }
+
+    /** Mute or unmute the local microphone for the active call. */
+    fun setMuted(muted: Boolean) {
+        webRtc?.setMuted(muted)
+    }
+
+    /** Switch audio output between earpiece and loudspeaker. */
+    fun setSpeaker(speakerOn: Boolean) {
+        webRtc?.setSpeaker(speakerOn)
+    }
+
+    /** Switch between front and back camera during a video call. */
+    fun switchCamera() {
+        webRtc?.switchCamera()
+    }
+
+    /** Attach a VideoSink for rendering the remote video stream (called from UI). */
+    fun setRemoteVideoSink(sink: org.webrtc.VideoSink?) {
+        webRtc?.setRemoteVideoSink(sink)
+    }
+
+    /** Attach a VideoSink for the local camera preview (called from UI). */
+    fun setLocalVideoSink(sink: org.webrtc.VideoSink?) {
+        webRtc?.setLocalVideoSink(sink)
+    }
+
+    /** Enable or disable the local video track (camera mute). */
+    fun setVideoEnabled(enabled: Boolean) {
+        webRtc?.setVideoEnabled(enabled)
+    }
+
+    /** Start sharing the screen — [resultData] is the MediaProjection permission intent. */
+    fun startScreenShare(resultData: android.content.Intent) {
+        webRtc?.startScreenShare(resultData)
+    }
+
+    /** Stop screen sharing and restore camera. */
+    fun stopScreenShare() {
+        webRtc?.stopScreenShare()
+    }
+
+    /** Called by WebRTCBridge when screen share starts or stops (including OS-forced stop). */
+    fun onScreenShareStateChanged(sharing: Boolean) {
+        _isScreenSharing.value = sharing
+        if (!sharing) {
+            // Also reset when call ends
+        }
+    }
+
+    /** Resolve a peer's display name from the conversations list, or shorten peerIdB64. */
+    private fun peerDisplayName(peerIdB64: String): String =
+        _conversations.value.firstOrNull { it.peerIdB64 == peerIdB64 }?.displayName
+            ?: (peerIdB64.take(8) + "…")
+
+    /**
+     * Forward a local ICE candidate (discovered by [WebRTCBridge]) to the remote peer
+     * through Rust signaling.
+     */
+    fun sendIceCandidate(
+        callIdHex: String,
+        peerIdB64: String,
+        candidate: String,
+        sdpMid: String,
+        sdpMlineIndex: Int,
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            core?.sendIceCandidate(callIdHex, peerIdB64, candidate, sdpMid, sdpMlineIndex)
+        }
+    }
+
+    /** Called by WebRTCBridge (offerer) when ICE fails: signals a new offer with fresh ICE credentials. */
+    fun sendIceRestartOffer(callIdHex: String, peerIdB64: String, offerSdp: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            Log.d(TAG, "sendIceRestartOffer callId=${callIdHex.take(12)}")
+            core?.sendIceRestartOffer(callIdHex, peerIdB64, offerSdp)
+        }
+    }
+
+    /** Called by WebRTCBridge (answerer) after processing IceRestartOffer and generating a new answer. */
+    fun sendIceRestartAnswer(callIdHex: String, peerIdB64: String, answerSdp: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            Log.d(TAG, "sendIceRestartAnswer callId=${callIdHex.take(12)}")
+            core?.sendIceRestartAnswer(callIdHex, peerIdB64, answerSdp)
+        }
+    }
+
+    fun refreshActiveCalls() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val json = core?.getActiveCallsJson() ?: "[]"
+            val arr = runCatching { JSONArray(json) }.getOrNull() ?: return@launch
+            if (arr.length() == 0) {
+                _activeCall.value = null
+                return@launch
+            }
+            val obj = arr.getJSONObject(0)
+            _activeCall.value = ActiveCallInfo(
+                callIdHex = obj.optString("call_id"),
+                peerIdB64 = obj.optString("peer"),
+                hasVideo = obj.optBoolean("has_video"),
+                isOutgoing = obj.optBoolean("outgoing"),
+                state = obj.optString("state", "Active"),
+                displayName = peerDisplayName(obj.optString("peer"))
+            )
+        }
+    }
+
+    // ── File Transfer (Phase 6) ───────────────────────────────────────────
+
+    fun sendFile(convId: String, fileName: String, data: ByteArray) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val peerIdB64 = if (convId.startsWith("d:")) convId.removePrefix("d:") else return@launch
+            core?.sendFileBytes(peerIdB64, fileName, data)
+            refreshTransfers()
+        }
+    }
+
+    /**
+     * Send any attachment (photo, audio, video-note, or file) to a direct conversation.
+     * [mimeType] is used by the receiver to decide how to render the message.
+     * For group chats this currently falls back to a text notification (group file
+     * transfer is a future milestone).
+     */
+    fun sendAttachment(convId: String, fileName: String, mimeType: String, data: ByteArray) {
+        if (convId.startsWith("g:")) {
+            _sendError.value = "Отправка файлов в группы пока не поддерживается"
+            return
+        }
+        if (data.size > 100 * 1024 * 1024) {
+            _sendError.value = "Файл слишком большой (максимум 100 МБ)"
+            return
+        }
+        val peerIdB64 = convId.removePrefix("d:")
+        viewModelScope.launch(Dispatchers.IO) {
+            val transferId = core?.sendFileBytes(peerIdB64, fileName, data)
+            if (transferId == null) {
+                _sendError.value = "Не удалось начать передачу файла"
+            } else {
+                refreshTransfers()
+                refreshMessages(convId)
+                refreshConversations()
+            }
+        }
+    }
+
+    fun cancelTransfer(transferIdHex: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            core?.cancelTransfer(transferIdHex)
+            refreshTransfers()
+        }
+    }
+
+    fun refreshTransfers() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val json = core?.getTransfersJson() ?: "[]"
+            val arr = runCatching { JSONArray(json) }.getOrNull() ?: return@launch
+            val list = mutableListOf<TransferItem>()
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                list += TransferItem(
+                    id = o.optString("id"),
+                    peer = o.optString("peer"),
+                    fileName = o.optString("file_name"),
+                    fileSize = o.optLong("file_size"),
+                    mimeType = o.optString("mime_type"),
+                    progress = o.optDouble("progress", 0.0).toFloat(),
+                    isOutbound = o.optBoolean("is_outbound")
+                )
+            }
+            _transfers.value = list
+        }
+    }
+
+    // ── Bridge / Censorship (Phase 7) ─────────────────────────────────────
+
+    fun loadBridgeStatus() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val json = core?.getBridgeStatusJson() ?: "{}"
+            val obj = runCatching { JSONObject(json) }.getOrNull() ?: return@launch
+            val bridgesArr = obj.optJSONArray("bridges") ?: JSONArray()
+            val bridges = mutableListOf<JSONObject>()
+            for (i in 0 until bridgesArr.length()) {
+                bridges += bridgesArr.getJSONObject(i)
+            }
+            _bridgeStatus.value = BridgeStatus(
+                mode = obj.optString("mode", "none"),
+                bridges = bridges,
+                hasWorking = obj.optBoolean("has_working")
+            )
+        }
+    }
+
+    fun addBridge(bridgeLine: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            core?.addBridge(bridgeLine)
+            loadBridgeStatus()
+        }
+    }
+
+    fun setBridgeMode(modeStr: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            core?.setBridgeMode(modeStr)
+            loadBridgeStatus()
+        }
+    }
+
+    fun detectCensorship() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val json = core?.detectCensorshipJson() ?: "{\"level\":\"None\"}"
+            val obj = runCatching { JSONObject(json) }.getOrNull()
+            _censorshipLevel.value = obj?.optString("level", "None") ?: "None"
+        }
+    }
+
+    // ── Groups ────────────────────────────────────────────────────────────────
+
+    fun refreshGroups() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val json = core?.getGroupsJson() ?: "[]"
+            _groups.value = parseGroups(json)
+        }
+    }
+
+    fun loadGroupInfo(groupIdHex: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val json = core?.getGroupInfoJson(groupIdHex) ?: return@launch
+            _currentGroupInfo.value = parseGroupInfo(json)
+        }
+    }
+
+    fun createGroup(name: String, onResult: (String?) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val groupIdHex = core?.createGroup(name)
+            withContext(Dispatchers.Main) { onResult(groupIdHex) }
+            if (groupIdHex != null) {
+                refreshGroups()
+                refreshConversations()
+            }
+        }
+    }
+
+    fun inviteToGroup(groupIdHex: String, peerIdB64: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val info = _currentGroupInfo.value
+            if (info != null && info.memberCount >= 16) {
+                _sendError.value = "Группа заполнена (максимум 16 участников)"
+                return@launch
+            }
+            val ok = core?.inviteToGroup(groupIdHex, peerIdB64) ?: false
+            if (!ok) {
+                _sendError.value = "Не удалось добавить участника. Возможно, группа заполнена."
+            }
+            loadGroupInfo(groupIdHex)
+        }
+    }
+
+    fun leaveGroup(groupIdHex: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            core?.leaveGroup(groupIdHex)
+            refreshGroups()
+            refreshConversations()
+            _currentGroupInfo.value = null
+        }
+    }
+
+    fun startGroupAudioCall(groupIdHex: String, onStarted: () -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val offerSdp = try {
+                webRtc?.createOfferedCall("group:$groupIdHex", hasVideo = false)
+                    ?: return@launch
+            } catch (e: Exception) {
+                Log.e(TAG, "group audio call createOffer failed: ${e.message}")
+                return@launch
+            }
+            val sessionId = core?.startGroupCall(groupIdHex, offerSdp, false)
+            if (sessionId != null) {
+                withContext(Dispatchers.Main) { onStarted() }
+                // Ring timeout: auto-cancel if nobody answers within 45 s
+                delay(45_000L)
+                if (_activeCall.value == null) {
+                    Log.i(TAG, "Group audio call ring timeout — cancelling $sessionId")
+                    webRtc?.onCallEnded()
+                }
+            }
+        }
+    }
+
+    fun startGroupVideoCall(groupIdHex: String, onStarted: () -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val info = _currentGroupInfo.value
+            if (info != null && info.memberCount > 8) {
+                _sendError.value = "Видеоконференция доступна для групп до 8 участников"
+                return@launch
+            }
+            val offerSdp = try {
+                webRtc?.createOfferedCall("group:$groupIdHex", hasVideo = true)
+                    ?: return@launch
+            } catch (e: Exception) {
+                Log.e(TAG, "group video call createOffer failed: ${e.message}")
+                return@launch
+            }
+            val sessionId = core?.startGroupCall(groupIdHex, offerSdp, true)
+            if (sessionId != null) {
+                withContext(Dispatchers.Main) { onStarted() }
+                // Ring timeout: auto-cancel if nobody answers within 45 s
+                delay(45_000L)
+                if (_activeCall.value == null) {
+                    Log.i(TAG, "Group video call ring timeout — cancelling $sessionId")
+                    webRtc?.onCallEnded()
+                }
+            }
+        }
+    }
+
+    // ── Event polling ─────────────────────────────────────────────────────
+
+    private fun startEventPolling() {
+        // Signal to AdaForegroundService that ViewModel is the active event consumer.
+        // The service must not poll while this is true to avoid stealing events from
+        // the single-consumer Rust MPSC channel.
+        AdaCoreHolder.isViewModelActive = true
+        viewModelScope.launch(Dispatchers.IO) {
+            while (true) {
+                drainEvents()
+                // B2 fix: poll at 50 ms during active/incoming calls for low-latency signalling;
+                // drop back to 500 ms otherwise to spare CPU and battery.
+                val delayMs = if (_activeCall.value != null || _incomingCall.value != null) 50L else 500L
+                delay(delayMs)
+            }
+        }
+    }
+
+    private fun drainEvents() {
+        val c = core ?: return
+        var count = 0
+        // ST3 fix: cap per-drain at 50 events to avoid blocking the IO thread
+        // during Doze wake-up bursts with hundreds of accumulated events.
+        while (count < 50) {
+            val json = c.pollEventJson() ?: break
+            count++
+            val event = parseEvent(json) ?: continue
+            handleEvent(event)
+        }
+        if (count > 0) Log.d(TAG, "drainEvents: processed $count events")
+    }
+
+    private fun handleEvent(event: AdaEvent) {
+        Log.d(TAG, "handleEvent type=${event.type}")
+        when (event.type) {
+            "MessageReceived" -> {
+                _irohConnecting.value = false  // peer is reachable — hide indicator
+                connectingResetJob?.cancel()    // no need to timeout, connection confirmed
+                val sender = event.raw.optString("sender")
+                val directConvId = "d:$sender"
+                val groupConvId = event.raw.optString("group_id", "")
+                    .takeIf { it.isNotBlank() }?.let { "g:$it" }
+                val relevantConv = groupConvId ?: directConvId
+                if (relevantConv == activeConvId) {
+                    // Chat screen is open — refresh message list immediately
+                    activeConvId?.let { refreshMessages(it) }
+                } else {
+                    // App is in foreground but on a different screen — post heads-up notification
+                    val senderName = event.raw.optString("sender_name", "").ifBlank {
+                        sender.take(8) + "…"
+                    }
+                    val text = event.raw.optString("text", "Новое сообщение").let {
+                        if (it.length > 80) it.take(80) + "…" else it
+                    }
+                    postMessageNotification(senderName, text, relevantConv)
+                }
+                refreshConversations()
+            }
+            "MessageStatusChanged" -> {
+                activeConvId?.let { refreshMessages(it) }
+            }
+            "IncomingCall" -> {
+                val callId = event.raw.optString("call_id")
+                val peer   = event.raw.optString("peer")
+                val video  = event.raw.optBoolean("has_video")
+                val offer  = event.raw.optString("offer_sdp", "")
+                // If we are already in an active call, auto-decline to prevent ringtone
+                // playing over the active call and leave the UI in an ambiguous state.
+                if (_activeCall.value != null) {
+                    Log.w(TAG, "IncomingCall during active call — auto-declining $callId")
+                    viewModelScope.launch(Dispatchers.IO) {
+                        core?.declineCall(callId, peer)
+                    }
+                    return
+                }
+                _incomingCall.value = IncomingCallInfo(callId, peer, video, offer, displayName = peerDisplayName(peer))
+                // B44: post heads-up/full-screen notification so user sees the call
+                // even when app is in the background (ViewModel alive but UI paused).
+                postIncomingCallNotification(callId, _incomingCall.value!!.displayName.ifBlank { peer }, video)
+                // WebRTC setup happens when user taps Accept (not auto)
+            }
+            "IceCandidate" -> {
+                val candidate    = event.raw.optString("candidate", "")
+                val sdpMid       = event.raw.optString("sdp_mid", "")
+                val sdpMLineIdx  = event.raw.optInt("sdp_mline_index", 0)
+                if (candidate.isNotBlank()) {
+                    webRtc?.onRemoteIceCandidate(candidate, sdpMid, sdpMLineIdx)
+                }
+            }
+            "IceRestartOffer" -> {
+                // Answerer side: peer sent a fresh offer after ICE failure.
+                val callId   = event.raw.optString("call_id", "")
+                val peer     = event.raw.optString("peer", "")
+                val offerSdp = event.raw.optString("offer_sdp", "")
+                val activeId = _activeCall.value?.callIdHex ?: ""
+                // Ignore if offer is for a different/old call (stale delivery after new call started).
+                if (offerSdp.isBlank() || callId != activeId) {
+                    Log.w(TAG, "IceRestartOffer ignored: callId=$callId activeId=$activeId")
+                } else {
+                    Log.d(TAG, "IceRestartOffer received — answering ICE restart")
+                    viewModelScope.launch(Dispatchers.IO) {
+                        webRtc?.acceptIceRestartOffer(callId, peer, offerSdp)
+                    }
+                }
+            }
+            "CallStateChanged" -> {
+                val state = event.raw.optString("state", "")
+                if (state == "Ended" || state == "Failed") {
+                    webRtc?.onCallEnded()
+                    _activeCall.value = null
+                    _incomingCall.value = null
+                    _isScreenSharing.value = false
+                } else {
+                    if (state == "Active") {
+                        val answerSdp = event.raw.optString("answer_sdp", "")
+                        if (answerSdp.isNotBlank()) webRtc?.onRemoteAnswerReceived(answerSdp)
+                    }
+                    // Preserve isOutgoing from existing call state — Rust event may omit this field.
+                    val prevOutgoing = _activeCall.value?.isOutgoing ?: false
+                    val eventPeer = event.raw.optString("peer")
+                    // Preserve displayName from existing state if new event doesn't change peer
+                    val prevDisplayName = _activeCall.value?.takeIf { it.peerIdB64 == eventPeer }?.displayName
+                        ?: peerDisplayName(eventPeer)
+                    _activeCall.value = ActiveCallInfo(
+                        callIdHex = event.raw.optString("call_id"),
+                        peerIdB64 = eventPeer,
+                        hasVideo = event.raw.optBoolean("has_video"),
+                        isOutgoing = if (event.raw.has("outgoing")) event.raw.getBoolean("outgoing") else prevOutgoing,
+                        state = state,
+                        displayName = prevDisplayName
+                    )
+                }
+            }
+            "TransferEvent" -> {
+                val evType     = event.raw.optString("event", "")
+                val transferId = event.raw.optString("transfer_id", "")
+                val mimeType   = event.raw.optString("mime_type", "")
+                val fileName   = event.raw.optString("file_name", "")
+
+                if (evType == "completed" && transferId.isNotBlank() && fileName.isNotBlank()) {
+                    // Save received file to the app cache directory
+                    viewModelScope.launch(Dispatchers.IO) {
+                        try {
+                            val dir = java.io.File(appContext.cacheDir, "attachments/$transferId")
+                            dir.mkdirs()
+                            val destFile = java.io.File(dir, fileName)
+                            val metaJson = core?.saveTransferToFile(transferId, destFile.absolutePath)
+                            if (metaJson != null) {
+                                _savedFiles.value = _savedFiles.value +
+                                    (transferId to destFile.absolutePath) +
+                                    (fileName to destFile.absolutePath)
+                                activeConvId?.let { refreshMessages(it) }
+                                Log.i(TAG, "Transfer $transferId saved to ${destFile.absolutePath}")
+                            } else {
+                                Log.w(TAG, "saveTransferToFile returned null for $transferId")
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to save transfer $transferId: ${e.message}")
+                        }
+                    }
+                }
+                refreshTransfers()
+            }
+            "NetworkConnected", "NetworkDisconnected" -> { /* log only */ }
+            "PeerOnline", "PeerOffline", "PeerDiscovered" -> {
+                refreshConversations()
+            }
+            "GroupInviteReceived", "GroupJoined" -> {
+                refreshConversations()
+                refreshGroups()
+            }
+            else -> { /* ignore */ }
+        }
+    }
+
+    // ── App lock ──────────────────────────────────────────────────────────
+
+    /** Play a voice message from a local file path. Stops any currently playing audio. */
+    fun playVoice(transferId: String, filePath: String) {
+        stopVoice()
+        _playingVoiceId.value = transferId
+        val mp = MediaPlayer()
+        mediaPlayer = mp
+        try {
+            mp.setDataSource(filePath)
+            mp.setOnCompletionListener { stopVoice() }
+            mp.setOnErrorListener { _, _, _ -> stopVoice(); true }
+            mp.prepare()
+            mp.start()
+        } catch (e: Exception) {
+            Log.e(TAG, "playVoice failed: ${e.message}")
+            stopVoice()
+        }
+    }
+
+    /** Stop the currently playing voice message. */
+    fun stopVoice() {
+        mediaPlayer?.runCatching { stop(); release() }
+        mediaPlayer = null
+        _playingVoiceId.value = null
+    }
+
+    /** Zero the cached pattern cells from RAM. Call when SettingsScreen is disposed. */
+    fun zeroPatternCells() {
+        synchronized(cellsLock) {
+            lastPatternCells?.fill(0)
+            lastPatternCells = null
+        }
+    }
+
+    /**
+     * Lock the app: zero secret material in RAM, stop the core.
+     * The user will be required to authenticate again.
+     */
+    fun lockApp() {
+        zeroPatternCells()
+        stopVoice()
+        _initialized.value = false
+        _isCleanMode.value = false
+        AdaCoreHolder.isViewModelActive = false
+        appContext.stopService(android.content.Intent(appContext, com.ada.messenger.service.AdaForegroundService::class.java))
+        if (AdaCoreHolder.instance === core) AdaCoreHolder.instance = null
+        core?.close()
+        core = null
+        _conversations.value = emptyList()
+        _messages.value = emptyList()
+        _groups.value = emptyList()
+        _currentGroupInfo.value = null
+        _savedFiles.value = emptyMap()
+    }
+
+    /**
+     * Enter "clean mode": activated by the clean PIN.
+     * Shows a blank messenger UI (no real identity, no messages) — indistinguishable
+     * from a freshly registered account to an observer.
+     */
+    fun enterCleanMode() {
+        lastPatternCells?.fill(0)
+        lastPatternCells = null
+        _isCleanMode.value = true
+        _conversations.value = emptyList()
+        _messages.value = emptyList()
+        _initialized.value = true
+        Log.i(TAG, "Entered clean mode")
+    }
+
+    /**
+     * Kill code: irreversibly wipe ALL app data.
+     * Called when the user enters the kill PIN.
+     */
+    fun executeKillCode() {
+        Log.w(TAG, "Kill code triggered — wiping all data")
+        // 1. Zero secret RAM
+        zeroPatternCells()
+        // 2. Close and discard the core
+        AdaCoreHolder.isViewModelActive = false
+        appContext.stopService(android.content.Intent(appContext, com.ada.messenger.service.AdaForegroundService::class.java))
+        if (AdaCoreHolder.instance === core) AdaCoreHolder.instance = null
+        core?.close()
+        core = null
+        // 3. Delete encrypted database and salt file — MUST complete before UI reset
+        // K7: moved _initialized.value = false INSIDE the coroutine (after deletion)
+        // to prevent a window where the UI has navigated away but data still exists.
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val dataDir = appContext.filesDir
+            dataDir.listFiles()?.forEach { it.deleteRecursively() }
+            // 4. Clear all SharedPreferences stores
+            val prefsDir = java.io.File(dataDir.parent, "shared_prefs")
+            prefsDir.listFiles()?.forEach { it.delete() }
+            // 5. Reset UI only after deletion is confirmed complete
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                _initialized.value = false
+                _isCleanMode.value = false
+                _conversations.value = emptyList()
+                _messages.value = emptyList()
+                appContext.getSharedPreferences(IDENTITY_PREFS, android.content.Context.MODE_PRIVATE)
+                    .edit().clear().commit()
+            }
+        }
+    }
+
+    // ── Cleanup ───────────────────────────────────────────────────────────
+
+    override fun onCleared() {
+        super.onCleared()
+        Log.i(TAG, "onCleared — stopping service and closing core")
+        // H1 fix: zero pattern cells before GC to minimise in-memory window.
+        zeroPatternCells()
+        // Release any active WebRTC call resources (PeerConnection, tracks, audio focus).
+        // onCallEnded() is idempotent — safe to call even when no call is active.
+        webRtc?.onCallEnded()
+        AdaCoreHolder.isViewModelActive = false
+        // Stop foreground service when ViewModel is destroyed
+        appContext.stopService(android.content.Intent(appContext, com.ada.messenger.service.AdaForegroundService::class.java))
+        // D1: clear the singleton BEFORE closing so the Service sees null quickly
+        if (AdaCoreHolder.instance === core) AdaCoreHolder.instance = null
+        core?.close()
+        core = null
+    }
+
+    private fun postIncomingCallNotification(callIdHex: String, peerDisplay: String, hasVideo: Boolean) {
+        try {
+            val showContent = appLock.notificationShowContent
+            val callIntent = Intent(appContext, com.ada.messenger.MainActivity::class.java).apply {
+                putExtra(com.ada.messenger.MainActivity.EXTRA_OPEN_CALL, true)
+                putExtra(com.ada.messenger.MainActivity.EXTRA_CALL_ID,   callIdHex)
+                putExtra(com.ada.messenger.MainActivity.EXTRA_CALL_PEER,  peerDisplay)
+                putExtra(com.ada.messenger.MainActivity.EXTRA_CALL_VIDEO, hasVideo)
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val pi = PendingIntent.getActivity(
+                appContext, com.ada.messenger.service.AdaForegroundService.NOTIF_ID_CALL,
+                callIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            val title = if (hasVideo) "Входящий видеозвонок" else "Входящий звонок"
+            val ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+            val notif = NotificationCompat.Builder(
+                appContext,
+                com.ada.messenger.service.AdaForegroundService.CHANNEL_CALL_ID
+            )
+                .setContentTitle(title)
+                .setContentText(if (showContent) peerDisplay else "")
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentIntent(pi)
+                .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setCategory(NotificationCompat.CATEGORY_CALL)
+                .setFullScreenIntent(pi, true)
+                .setVibrate(longArrayOf(0, 500, 250, 500, 250, 500))
+                .setSound(ringtoneUri)
+                .setVisibility(if (showContent) NotificationCompat.VISIBILITY_PUBLIC else NotificationCompat.VISIBILITY_PRIVATE)
+                .setAutoCancel(true)
+                .build()
+            val nm = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(com.ada.messenger.service.AdaForegroundService.NOTIF_ID_CALL, notif)
+        } catch (e: Exception) {
+            Log.w(TAG, "postIncomingCallNotification failed: ${e.message}")
+        }
+    }
+
+    private fun postMessageNotification(from: String, text: String, convId: String) {
+        try {
+            val showContent = appLock.notificationShowContent
+            val deepLinkIntent = Intent(appContext, com.ada.messenger.MainActivity::class.java).apply {
+                putExtra(com.ada.messenger.MainActivity.EXTRA_OPEN_CONV, convId)
+                putExtra(com.ada.messenger.MainActivity.EXTRA_OPEN_CONV_NAME, from)
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val pi = PendingIntent.getActivity(
+                appContext, convId.hashCode(),
+                deepLinkIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            val notif = NotificationCompat.Builder(appContext,
+                com.ada.messenger.service.AdaForegroundService.CHANNEL_MSG_ID)
+                .setContentTitle(if (showContent) from else "ADA")
+                .setContentText(if (showContent) text else "Новое сообщение")
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentIntent(pi)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setVisibility(if (showContent) NotificationCompat.VISIBILITY_PRIVATE else NotificationCompat.VISIBILITY_SECRET)
+                .setAutoCancel(true)
+                .build()
+            val nm = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(com.ada.messenger.service.AdaForegroundService.NOTIF_ID_MESSAGE, notif)
+        } catch (e: Exception) {
+            Log.w(TAG, "postMessageNotification failed: ${e.message}")
+        }
+    }
+
+    // ── Factory ───────────────────────────────────────────────────────────
+
+    class Factory(private val context: Context) : ViewModelProvider.Factory {
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : ViewModel> create(modelClass: Class<T>): T {
+            return AdaCoreViewModel(context.applicationContext) as T
+        }
+    }
+
+    // ── Private helpers ───────────────────────────────────────────────────
+
+    private fun startAdaForegroundService(displayName: String, dataDir: String) {
+        val intent = com.ada.messenger.service.AdaForegroundService.buildStartIntent(
+            appContext, displayName, dataDir
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            appContext.startForegroundService(intent)
+        } else {
+            appContext.startService(intent)
+        }
+    }
+
+    private fun saveAdaCredentials(displayName: String, dataDir: String) {
+        appContext.getSharedPreferences(
+            com.ada.messenger.service.ADANotificationWorker.PREFS_NAME,
+            android.content.Context.MODE_PRIVATE
+        ).edit()
+            .putString(com.ada.messenger.service.ADANotificationWorker.PREF_DISPLAY_NAME, displayName)
+            .putString(com.ada.messenger.service.ADANotificationWorker.PREF_DATA_DIR, dataDir)
+            .commit()
+    }
+}

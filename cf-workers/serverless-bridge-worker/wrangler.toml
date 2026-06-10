@@ -1,0 +1,30 @@
+name = "ada-serverless-bridge"
+main = "index.js"
+compatibility_date = "2025-04-01"
+workers_dev = true
+
+[durable_objects]
+bindings = [
+  { name = "ADA_BRIDGE", class_name = "AdaBridge" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AdaBridge"]
+
+[vars]
+BRIDGE_PATH = "/ada"
+BRIDGE_FINGERPRINT_HEX = ""
+
+# Optional: raise if you want mailbox size caps per peer.
+MAX_QUEUE_PER_PEER = "256"
+
+# Token-bucket defaults mirror the Rust reference bridge backend.
+MAILBOX_IP_RATE_CAPACITY = "60"
+MAILBOX_IP_RATE_REFILL_PER_SEC = "10"
+MAILBOX_PEER_RATE_CAPACITY = "30"
+MAILBOX_PEER_RATE_REFILL_PER_SEC = "5"
+WS_REGISTER_IP_RATE_CAPACITY = "12"
+WS_REGISTER_IP_RATE_REFILL_PER_SEC = "1"
+WS_REGISTER_PEER_RATE_CAPACITY = "12"
+WS_REGISTER_PEER_RATE_REFILL_PER_SEC = "1"

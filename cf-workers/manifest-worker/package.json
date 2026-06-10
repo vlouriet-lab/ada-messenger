@@ -1,0 +1,13 @@
+{
+  "name": "ada-manifest-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check index.js",
+    "dry-run": "wrangler deploy --dry-run",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.12.0"
+  }
+}

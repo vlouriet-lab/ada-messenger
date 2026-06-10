@@ -1,0 +1,10 @@
+name = "ada-manifest"
+main = "index.js"
+compatibility_date = "2025-04-01"
+workers_dev = true
+
+[vars]
+MANIFEST_PATH = "/manifest.json"
+
+# Deploy-time secret:
+#   wrangler secret put SIGNED_MANIFEST_JSON

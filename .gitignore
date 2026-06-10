@@ -1,0 +1,64 @@
+# ───────────────────────── ADA Messenger .gitignore ─────────────────────────
+
+# ============ SECRETS — never commit ============
+# Android signing keystore & local signing credentials
+*.jks
+*.keystore
+*.p12
+*.pfx
+android-app/local.properties
+local.properties
+# Generic secret / key material
+*.pem
+*.key
+.env
+.env.*
+secrets.*
+**/serviceAccount*.json
+google-services.json
+
+# ============ Rust / Cargo ============
+ada-core/target/
+ada-core/target-android/
+**/target/
+**/*.rs.bk
+*.pdb
+
+# ============ Android / Gradle ============
+.gradle/
+**/build/
+**/.cxx/
+**/jniLibs/
+captures/
+.externalNativeBuild/
+
+# ============ Compose Desktop / Windows build output ============
+android-app/desktopApp/build/
+releases/
+*.exe
+*.msi
+!installer.nsi
+
+# ============ Node (Cloudflare Workers) ============
+node_modules/
+.wrangler/
+npm-debug.log*
+
+# ============ IDE / Editor ============
+.idea/
+.vscode/
+*.iml
+
+# ============ Logs, dumps, scratch ============
+*.log
+*.txt
+!**/proguard-rules.pro
+uidump*.xml
+ui_*.xml
+*.db
+*.db-journal
+*.b64
+
+# ============ OS ============
+.DS_Store
+Thumbs.db

@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ADA Messenger</string>
+
+    <!-- Common buttons -->
+    <string name="button_back">Retour</string>
+    <string name="button_next">Suivant</string>
+    <string name="button_cancel">Annuler</string>
+    <string name="button_close">Fermer</string>
+    <string name="button_clear">Effacer</string>
+    <string name="button_confirm">Confirmer</string>
+    <string name="button_login">Se connecter</string>
+
+    <!-- Notifications / Service -->
+    <string name="notification_default_message">Nouveau message</string>
+    <string name="notification_incoming_video_call">Appel vidéo entrant</string>
+    <string name="notification_incoming_audio_call">Appel entrant</string>
+    <string name="notification_channel_messages">Messages</string>
+    <string name="notification_channel_messages_desc">Notifications de nouveaux messages</string>
+    <string name="notification_channel_calls">Appels entrants</string>
+    <string name="notification_channel_calls_desc">Notifications d\'appels entrants</string>
+    <string name="notification_app_locked_title">ADA est verrouillé</string>
+    <string name="notification_app_locked_text">Ouvrez l\'application pour recevoir des messages</string>
+
+    <!-- Errors -->
+    <string name="error_message_too_long">Le message est trop long (max. %d caractères)</string>
+    <string name="error_send_group_message_failed">Échec de l\'envoi du message au groupe.</string>
+    <string name="error_send_message_no_key_exchange">Échec de l\'envoi du message. Échangez d\'abord les codes QR avec le contact.</string>
+    <string name="error_group_full">Le groupe est plein (maximum %d membres)</string>
+    <string name="error_add_member_failed">Impossible d\'ajouter le membre. Le groupe est peut-être plein.</string>
+    <string name="error_profile_creation_failed">Impossible de créer le profil. Veuillez réessayer.</string>
+    <string name="error_profile_recovery_failed">Impossible de récupérer le profil.</string>
+    <string name="error_pattern_invalid">Motif incorrect. Veuillez réessayer.</string>
+    <string name="error_unlock_failed">Échec du déverrouillage. Entrez votre motif.</string>
+    <string name="error_file_transfer_group_not_supported">L\'envoi de fichiers aux groupes n\'est pas encore pris en charge</string>
+    <string name="error_file_too_large">Fichier trop volumineux (maximum 50 Go)</string>
+    <string name="error_file_prepare_failed">Impossible de preparer le fichier pour l\'envoi</string>
+    <string name="error_video_call_group_size">Appels vidéo disponibles pour les groupes jusqu\'à %d membres</string>
+    <string name="error_pattern_too_many_attempts">Trop de tentatives. Attendez %d secondes.</string>
+    <string name="error_pattern_incorrect_attempt">Motif incorrect (tentative %d sur 3). </string>
+    <string name="error_pattern_wrong_cell_count">Sélectionnez exactement 16 cellules</string>
+    <string name="error_pattern_mismatch">Le motif ou les couleurs ne correspondent pas. Réessayez.</string>
+    <string name="error_pattern_mismatch_hint">Répétez votre motif exactement, y compris les couleurs.</string>
+    <string name="error_pin_too_many_attempts">Trop de tentatives. Attendez </string>
+    <string name="error_pin_incorrect_attempt">PIN incorrect (tentative %d sur 3)</string>
+
+    <!-- Message previews -->
+    <string name="message_preview_outgoing_call">📞 Appel sortant</string>
+    <string name="message_preview_incoming_call">📞 Appel entrant</string>
+    <string name="message_preview_group_invite">👥 Invitation au groupe : </string>
+
+    <!-- Battery dialog -->
+    <string name="battery_dialog_title">Fonctionnement en arrière-plan</string>
+    <string name="battery_dialog_text">Pour recevoir des messages et des appels lorsque l\'application est réduite, désactivez l\'optimisation de la batterie pour ADA Messenger.\n\nCela n\'affecte pas la consommation — ADA ne fonctionne que lorsqu\'il y a une connexion P2P active.</string>
+    <string name="battery_dialog_allow">Autoriser</string>
+    <string name="battery_dialog_later">Plus tard</string>
+
+    <!-- Avatar -->
+    <string name="avatar_dialog_title">Choisir un avatar</string>
+
+    <!-- Call screen -->
+    <string name="call_screen_incoming_audio_call">Appel audio entrant</string>
+    <string name="call_action_reject">Refuser</string>
+    <string name="call_action_answer">Répondre</string>
+    <string name="call_state_connecting">Connexion…</string>
+    <string name="call_state_ringing">Sonnerie…</string>
+    <string name="call_state_initiating">Appel…</string>
+    <string name="call_state_ringing_short">Sonnerie…</string>
+    <string name="call_action_unmute_mic">Activer mic.</string>
+    <string name="call_action_mute_mic">Couper mic.</string>
+    <string name="call_action_camera_on">Caméra act.</string>
+    <string name="call_action_camera_off">Caméra dés.</string>
+    <string name="call_action_flip">Retourner</string>
+    <string name="call_action_stop_screen_share">Arrêter</string>
+    <string name="call_action_start_screen_share">Écran</string>
+    <string name="call_action_minimize">Réduire</string>
+    <string name="call_action_hangup">Raccrocher</string>
+    <string name="call_action_unmute_short">Activer</string>
+    <string name="call_action_speakerphone_on">Haut-parleur</string>
+    <string name="call_action_speakerphone_off">Écouteur</string>
+    <string name="call_unavailable_network">Les appels vocaux et video ne sont pas disponibles sur la route reseau actuelle.</string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_slide1_title">Chiffrement de bout en bout</string>
+    <string name="onboarding_slide1_desc">Tous les messages sont protégés par X3DH + Double Ratchet.\nPersonne sauf vous et le destinataire ne peut les lire.</string>
+    <string name="onboarding_slide2_title">Réseau pair à pair</string>
+    <string name="onboarding_slide2_desc">Pas de serveurs centraux. Vos données sont transmises\ndirectement entre appareils via un réseau P2P mesh.</string>
+    <string name="onboarding_slide3_title">Confidentialité totale</string>
+    <string name="onboarding_slide3_desc">Pas de téléphone, pas d\'email. Votre identité est définie\nuniquement par un motif visuel — mémorisez-le et connectez-vous.</string>
+    <string name="onboarding_profile_desc">Votre identité est stockée uniquement sur cet appareil.\nAucun serveur ni compte.</string>
+    <string name="onboarding_display_name_label">Nom d\'affichage</string>
+    <string name="onboarding_profile_creating">Création…</string>
+    <string name="onboarding_profile_button">Créer un profil</string>
+
+    <!-- Chat screen -->
+    <string name="chat_action_audio_call">Appel audio</string>
+    <string name="chat_action_video_call">Appel vidéo</string>
+    <string name="chat_action_more">Plus</string>
+    <string name="chat_action_incognito">Démarrer un chat incognito</string>
+    <string name="chat_action_clear_history">Effacer le chat</string>
+    <string name="chat_status_connecting">Établissement de la connexion…</string>
+    <string name="chat_reply_you">Vous</string>
+    <string name="chat_action_attach">Joindre</string>
+    <string name="chat_action_photo">Photo</string>
+    <string name="chat_action_file">Fichier</string>
+    <string name="chat_recording_indicator">● Enregistrement </string>
+    <string name="chat_input_hint">Message</string>
+    <string name="chat_action_send">Envoyer</string>
+    <string name="chat_action_voice_message">Message vocal</string>
+
+    <!-- Message actions dialog -->
+    <string name="dialog_message_title">Message</string>
+    <string name="message_action_reply">Répondre</string>
+    <string name="message_action_delete_for_me">Supprimer pour moi</string>
+    <string name="message_action_delete_for_all">Supprimer pour tous</string>
+
+    <!-- Clear chat dialog -->
+    <string name="dialog_clear_confirm_title">Effacer le chat ?</string>
+    <string name="dialog_clear_confirm_text">Tout l\'historique des messages sera supprimé uniquement pour vous.</string>
+    <string name="dialog_clear_confirm_button">Effacer</string>
+
+    <!-- Incognito dialog -->
+    <string name="dialog_incognito_title">Chat incognito</string>
+    <string name="dialog_incognito_text">Montrez ce QR à votre contact.\nLa session ne sera pas liée à votre ID principal.</string>
+
+    <!-- Add contact / open link -->
+    <string name="dialog_add_contact_title">Ajouter un contact ?</string>
+    <string name="dialog_open_link_title">Ouvrir le lien ?</string>
+    <string name="dialog_add_contact_button">Ajouter</string>
+    <string name="dialog_open_link_button">Ouvrir</string>
+
+    <!-- Media messages -->
+    <string name="audio_action_pause">Pause</string>
+    <string name="audio_action_play">Lecture</string>
+    <string name="message_type_voice">Vocal</string>
+    <string name="message_type_video">Vidéo</string>
+    <string name="video_action_watch">Regarder</string>
+
+    <!-- Group chat -->
+    <string name="group_action_add_member">Ajouter un membre</string>
+    <string name="group_member_slots">Places disponibles : </string>
+    <string name="group_contacts_header">Vos contacts :</string>
+    <string name="group_manual_entry">Ou entrez le Peer ID manuellement :</string>
+    <string name="group_manual_input_hint">Entrez le Peer ID du membre :</string>
+    <string name="group_action_group_call">Appel de groupe</string>
+    <string name="group_menu_members">Membres</string>
+    <string name="group_action_leave">Quitter le groupe</string>
+    <string name="group_member_count">membres</string>
+    <string name="group_info_members_header">Membres :</string>
+    <string name="group_member_role_owner">Propriétaire</string>
+    <string name="group_member_role_admin">Administrateur</string>
+    <string name="dialog_leave_confirm_title">Quitter le groupe ?</string>
+    <string name="dialog_leave_confirm_text">Vous ne recevrez plus de messages de ce groupe.</string>
+    <string name="dialog_leave_confirm_button">Quitter</string>
+    <string name="status_loading">Chargement…</string>
+
+    <!-- Date separators -->
+    <string name="date_today">Aujourd\'hui</string>
+    <string name="date_yesterday">Hier</string>
+
+    <!-- Pattern login -->
+    <string name="pattern_login_title">Entrez votre motif</string>
+    <string name="pattern_login_subtitle">Reproduisez le motif que vous avez créé lors de l\'inscription.</string>
+    <string name="pattern_login_forgot">J\'ai oublié mon motif</string>
+    <string name="lockout_countdown_prefix">Attendez </string>
+
+    <!-- Pattern registration -->
+    <string name="pattern_register_step1_title">Créez un motif</string>
+    <string name="pattern_register_step1_subtitle">Sélectionnez exactement 16 cellules.\nAppuyez à nouveau sur une cellule pour changer sa couleur (3 couleurs disponibles).\nC\'est votre mot de passe visuel — mémorisez-le.</string>
+    <string name="pattern_register_step1_hint">Appui : définir (couleur 1) → couleur 2 → couleur 3 → supprimer.</string>
+    <string name="pattern_register_step2_title">Confirmez le motif</string>
+    <string name="pattern_register_step2_subtitle">Dessinez le même motif avec les mêmes couleurs.</string>
+
+    <!-- Profile creation -->
+    <string name="profile_name_title">Votre nom</string>
+    <string name="profile_name_subtitle">Ce nom sera visible par vos contacts.\nVous pourrez le modifier plus tard.</string>
+    <string name="profile_name_hint">Nom / pseudo</string>
+    <string name="profile_creating_title">Création du profil…</string>
+    <string name="profile_creating_subtitle">Cela prendra quelques secondes</string>
+    <string name="profile_created_title">Profil créé !</string>
+
+    <!-- PIN login -->
+    <string name="pin_login_prompt">Entrez le code PIN</string>
+    <string name="pin_login_use_pattern">Se connecter avec le motif</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Paramètres</string>
+    <string name="settings_section_avatar">Avatar</string>
+    <string name="settings_my_avatar">Mon avatar</string>
+    <string name="settings_my_avatar_desc">Affiché à côté de votre profil</string>
+    <string name="settings_section_lock">Verrouillage de l\'app</string>
+    <string name="settings_pin_set">Code PIN défini</string>
+    <string name="settings_pin">Code PIN</string>
+    <string name="settings_pin_set_desc">Appuyez pour modifier ou désactiver</string>
+    <string name="settings_pin_unset_desc">Connexion rapide sans motif</string>
+    <string name="settings_pin_disable">Désactiver le PIN</string>
+    <string name="settings_pin_need_pattern">Connectez-vous avec le motif pour activer le PIN</string>
+    <string name="settings_section_notifications">Notifications</string>
+    <string name="settings_notif_content">Afficher le contenu</string>
+    <string name="settings_notif_content_desc">Nom de l\'expéditeur et texte dans les notifications (désactivez pour plus de confidentialité)</string>
+    <string name="settings_section_clean_pin">Leurre (PIN propre)</string>
+    <string name="settings_clean_pin_active">PIN propre actif</string>
+    <string name="settings_clean_pin">PIN propre</string>
+    <string name="settings_clean_pin_desc">Ouvre un messager vide sans messages sous contrainte</string>
+    <string name="settings_clean_pin_disable">Désactiver le PIN propre</string>
+    <string name="settings_section_kill_pin">Code de destruction</string>
+    <string name="settings_kill_pin_active">Code de destruction actif</string>
+    <string name="settings_kill_pin">Code de destruction</string>
+    <string name="settings_kill_pin_desc">Supprime irréversiblement toutes les données de l\'app lorsque ce PIN est saisi</string>
+    <string name="settings_kill_pin_disable">Désactiver le code de destruction</string>
+    <string name="settings_section_appearance">Apparence</string>
+    <string name="settings_theme">Thème</string>
+    <string name="settings_theme_system">Système</string>
+    <string name="settings_theme_light">Clair</string>
+    <string name="settings_theme_dark">Sombre</string>
+    <string name="settings_theme_dialog_title">Choisir le thème</string>
+    <string name="settings_dynamic_color">Couleurs dynamiques</string>
+    <string name="settings_dynamic_color_desc">Material You — couleurs du fond d\'écran</string>
+    <string name="settings_section_language">Langue</string>
+    <string name="settings_language">Langue de l\'app</string>
+    <string name="settings_language_system">Système</string>
+    <string name="settings_language_dialog_title">Choisir la langue</string>
+    <string name="settings_section_about">À propos</string>
+    <string name="settings_about_desc">Messagerie P2P chiffrée\nVersion 1.0.0</string>
+    <string name="settings_pin_dialog_set">Définir le PIN</string>
+    <string name="settings_pin_dialog_change">Modifier le PIN</string>
+    <string name="settings_pin_dialog_disable">Désactiver le PIN</string>
+    <string name="settings_pin_enter_current">Entrez le PIN actuel pour confirmer :</string>
+    <string name="settings_pin_label_current">PIN actuel</string>
+    <string name="settings_pin_label_new">Nouveau PIN (4 chiffres)</string>
+    <string name="settings_pin_label_repeat">Répéter le PIN</string>
+    <string name="settings_pin_label_4digits">PIN (4 chiffres)</string>
+    <string name="button_save">Enregistrer</string>
+
+    <!-- Calls -->
+    <string name="calls_no_active">Aucun appel actif</string>
+
+    <!-- Connection status bar -->
+    <string name="conn_green">Connecté</string>
+    <string name="conn_yellow">Connecté — retards possibles</string>
+    <string name="conn_orange">Limité — appels indisponibles</string>
+    <string name="conn_red">Pas de connexion</string>
+</resources>

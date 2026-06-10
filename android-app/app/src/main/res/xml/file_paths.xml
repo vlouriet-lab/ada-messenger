@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- App-private files directory (where TransferManager stores received files) -->
+    <files-path name="ada_transfers" path="." />
+    <!-- App-private cache directory (for temp files) -->
+    <cache-path name="ada_cache" path="." />
+</paths>

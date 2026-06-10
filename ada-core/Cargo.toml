@@ -1,0 +1,113 @@
+[package]
+name = "ada-core"
+version = "0.2.1"
+edition = "2021"
+
+[lib]
+name = "ada_core"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "ada-node"
+path = "src/bin/main.rs"
+
+[[bin]]
+name = "ada-bridge-node"
+path = "src/bin/ada_bridge_node.rs"
+
+[[bin]]
+name = "sign_manifest"
+path = "src/bin/sign_manifest.rs"
+
+[[bin]]
+name = "verify_manifest"
+path = "src/bin/verify_manifest.rs"
+
+[[bin]]
+name = "derive_manifest_public_key"
+path = "src/bin/derive_manifest_public_key.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "ansi"] }
+tracing-appender = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+hex = "0.4"
+rand = "0.8"
+ed25519-dalek = { version = "2.0", features = ["rand_core"] }
+x25519-dalek = { version = "2.0", features = ["static_secrets"] }
+aes-gcm = "0.10"
+hkdf = "0.12"
+sha2 = "0.10"
+prost = "0.12"
+once_cell = "1.18"
+zeroize = { version = "1.7", features = ["derive"] }
+jni = { version = "0.21", optional = true }
+futures = "0.3"
+base64 = "0.21"
+parking_lot = "0.12"
+blake3 = "1.5"
+mime_guess = "2.0"
+uuid = { version = "1", features = ["v4"] }
+tokio-tungstenite = { version = "0.21", features = ["rustls-tls-webpki-roots"] }
+tokio-rustls = "0.25"
+rustls = "0.22"
+webpki-roots = "0.26"
+axum = { version = "0.7", features = ["ws", "json", "http1", "tokio"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "http2"] }
+chacha20 = "0.9"
+rusqlite = { version = "0.31", features = [] }
+secrecy = "0.8"
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+iroh = { version = "0.96.1", features = ["address-lookup-mdns"] }
+log = "0.4"
+android_logger = { version = "0.14", optional = true }
+tracing-log = { version = "0.2", optional = true }
+opus = "0.3.1"
+image = "0.25.10"
+
+[dev-dependencies]
+tempfile = "3"
+rcgen = "0.13"
+
+[build-dependencies]
+prost-build = "0.12"
+cbindgen = "0.26"
+
+[features]
+default = ["proto", "bundled-sqlite"]
+proto = []
+# Use plain bundled SQLite (no encryption) — for development on desktop
+bundled-sqlite = ["rusqlite/bundled"]
+# Use SQLCipher with vendored OpenSSL — for production/mobile builds
+sqlcipher = ["rusqlite/bundled-sqlcipher-vendored-openssl"]
+jni-bindings = ["dep:jni", "dep:android_logger", "dep:tracing-log"]
+ffi = []
+mobile = ["proto", "ffi", "jni-bindings", "sqlcipher"]
+mobile-dev = ["proto", "ffi", "jni-bindings", "bundled-sqlite"]
+test-helpers = []
+
+# ── Release profile: optimized for Android .so size ──────────────────────────
+[profile.release]
+opt-level = "z"          # optimize for binary size (vs "3" for speed)
+lto = true               # link-time optimization — removes dead code across crates
+codegen-units = 1        # single codegen unit — better LTO, smaller binary
+panic = "abort"          # no unwinding machinery (~2–5 MB saved)
+strip = true             # strip debug symbols from .so (377 MB → ~15–25 MB)
+
+# `audiopus_sys` infers CMake's build type from Cargo's opt-level/debug env.
+# Without this override, Windows dev/test builds select CMAKE_BUILD_TYPE=Debug,
+# which pulls in the debug CRT and breaks MSVC linking for vendored Opus.
+[profile.dev.package.audiopus_sys]
+opt-level = 1
+debug = false
+
+[profile.test.package.audiopus_sys]
+opt-level = 1
+debug = false

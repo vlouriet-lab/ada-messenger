@@ -1,0 +1,17 @@
+# Local machine configuration for the Android/Desktop build.
+# Copy this file to "local.properties" and fill in your own values.
+# local.properties is git-ignored and MUST NOT be committed.
+
+# Path to your Android SDK installation
+sdk.dir=C\:\\Android\\Sdk
+
+# ---- Release signing (optional; needed only for signed release builds) ----
+# Generate a keystore with:
+#   keytool -genkeypair -v -keystore ada-release-key.jks \
+#     -keyalg RSA -keysize 2048 -validity 10000 -alias ada-key
+#
+# These properties are read by android-app/app/build.gradle.kts.
+signing.storeFile=ada-release-key.jks
+signing.storePassword=CHANGE_ME
+signing.keyAlias=ada-key
+signing.keyPassword=CHANGE_ME

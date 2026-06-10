@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ADA Messenger notification / status-bar icon (monochrome, white on transparent).
+  Shape: heptagon (7 sides) + Reuleaux-triangle shield cutout.
+
+  Coordinates scaled from 108 × 108 launcher → 24 × 24 (factor 2/9):
+    Outer heptagon  R = 44 × 2/9 ≈ 9.78,  centre (12, 12)
+    Inner Reuleaux  V1=(12,16.22) V2=(8.44,10) V3=(15.56,10)  r ≈ 7.11
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="
+            M12,2.22
+            L19.65,5.9 L21.53,14.18 L16.24,20.81
+            L7.76,20.81  L2.47,14.18  L4.35,5.9 Z
+            M8.44,10
+            A7.11,7.11 0 0 0 12,16.22
+            A7.11,7.11 0 0 0 15.56,10
+            A7.11,7.11 0 0 0 8.44,10 Z" />
+
+</vector>

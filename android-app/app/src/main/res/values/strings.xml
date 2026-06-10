@@ -1,0 +1,512 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ADA Messenger</string>
+
+    <!-- Common buttons -->
+    <string name="button_back">Back</string>
+    <string name="button_next">Next</string>
+    <string name="button_cancel">Cancel</string>
+    <string name="button_close">Close</string>
+    <string name="button_clear">Clear</string>
+    <string name="button_confirm">Confirm</string>
+    <string name="button_login">Log in</string>
+    <string name="button_export">Export</string>
+    <string name="button_copy">Copy</string>
+
+    <!-- Notifications / Service -->
+    <string name="notification_default_message">New message</string>
+    <string name="notification_incoming_video_call">Incoming video call</string>
+    <string name="notification_incoming_audio_call">Incoming call</string>
+    <string name="notification_channel_messages">Messages</string>
+    <string name="notification_channel_messages_desc">New message notifications</string>
+    <string name="notification_channel_calls">Incoming calls</string>
+    <string name="notification_channel_calls_desc">Incoming call notifications</string>
+    <string name="notification_app_locked_title">ADA is locked</string>
+    <string name="notification_app_locked_text">Open the app to receive messages</string>
+
+    <!-- Errors -->
+    <string name="error_message_too_long">Message is too long (max %d characters)</string>
+    <string name="error_send_group_message_failed">Failed to send message to group.</string>
+    <string name="error_send_message_no_key_exchange">Failed to send message. Exchange QR codes with the contact first.</string>
+    <string name="error_group_full">Group is full (maximum %d members)</string>
+    <string name="error_add_member_failed">Failed to add member. The group may be full.</string>
+    <string name="error_profile_creation_failed">Failed to create profile. Please try again.</string>
+    <string name="error_profile_recovery_failed">Failed to recover profile.</string>
+    <string name="error_pattern_invalid">Invalid pattern. Please try again.</string>
+    <string name="error_unlock_failed">Unlock failed. Enter your pattern.</string>
+    <string name="error_file_transfer_group_not_supported">File transfers to groups are not yet supported</string>
+    <string name="error_file_too_large">File is too large (maximum 50 GB)</string>
+    <string name="error_file_prepare_failed">Failed to prepare file for sending</string>
+    <string name="error_video_call_group_size">Video calls are available for groups up to %d members</string>
+    <string name="error_pattern_too_many_attempts">Too many attempts. Wait %d seconds.</string>
+    <string name="error_pattern_incorrect_attempt">Incorrect pattern (attempt %d of 3). </string>
+    <string name="error_pattern_wrong_cell_count">Select exactly 16 cells</string>
+    <string name="error_pattern_mismatch">Pattern or colors don\'t match. Try again.</string>
+    <string name="error_pattern_mismatch_hint">Repeat your pattern exactly, including colors.</string>
+    <string name="error_pin_too_many_attempts">Too many attempts. Wait </string>
+    <string name="error_pin_incorrect_attempt">Incorrect PIN (attempt %d of 3)</string>
+
+    <!-- Message previews -->
+    <string name="message_preview_outgoing_call">📞 Outgoing call</string>
+    <string name="message_preview_incoming_call">📞 Incoming call</string>
+    <string name="message_preview_group_invite">👥 Group invite: </string>
+
+    <!-- Battery dialog -->
+    <string name="battery_dialog_title">Background operation</string>
+    <string name="battery_dialog_text">To receive messages and calls when the app is minimized, disable battery optimization for ADA Messenger.\n\nThis does not affect battery usage — ADA only works when there is an active P2P connection.</string>
+    <string name="battery_dialog_allow">Allow</string>
+    <string name="battery_dialog_later">Later</string>
+
+    <!-- Avatar -->
+    <string name="avatar_dialog_title">Choose an avatar</string>
+
+    <!-- Call screen -->
+    <string name="call_screen_incoming_audio_call">Incoming audio call</string>
+    <string name="call_action_reject">Decline</string>
+    <string name="call_action_answer">Answer</string>
+    <string name="call_state_connecting">Connecting…</string>
+    <string name="call_state_ringing">Ringing…</string>
+    <string name="call_state_initiating">Calling…</string>
+    <string name="call_state_ringing_short">Ringing…</string>
+    <string name="call_action_unmute_mic">Unmute</string>
+    <string name="call_action_mute_mic">Mute</string>
+    <string name="call_action_camera_on">Camera on</string>
+    <string name="call_action_camera_off">Camera off</string>
+    <string name="call_action_flip">Flip</string>
+    <string name="call_action_stop_screen_share">Stop</string>
+    <string name="call_action_start_screen_share">Screen</string>
+    <string name="call_action_share_link">Share link</string>
+    <string name="call_share_link_chooser_title">Share call link</string>
+    <string name="call_action_minimize">Minimize</string>
+    <string name="call_action_hangup">End call</string>
+    <string name="call_action_unmute_short">Unmute</string>
+    <string name="call_action_speakerphone_on">Speaker</string>
+    <string name="call_action_speakerphone_off">Earpiece</string>
+    <string name="call_unavailable_network">Voice and video calls are unavailable on the current network route.</string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_slide1_title">End-to-end encryption</string>
+    <string name="onboarding_slide1_desc">All messages are protected by X3DH + Double Ratchet.\nNo one except you and the recipient can read them.</string>
+    <string name="onboarding_slide2_title">Peer-to-peer network</string>
+    <string name="onboarding_slide2_desc">No central servers. Your data is transmitted\ndirectly between devices via a P2P mesh network.</string>
+    <string name="onboarding_slide3_title">Complete privacy</string>
+    <string name="onboarding_slide3_desc">No phone number, no email. Your identity is defined\nonly by a visual pattern — remember it and log in.</string>
+    <string name="onboarding_profile_desc">Your identity is stored only on this device.\nNo servers or accounts.</string>
+    <string name="onboarding_display_name_label">Display name</string>
+    <string name="onboarding_profile_creating">Creating…</string>
+    <string name="onboarding_profile_button">Create profile</string>
+
+    <!-- Chat screen -->
+    <string name="chat_action_audio_call">Audio call</string>
+    <string name="chat_action_video_call">Video call</string>
+    <string name="chat_action_more">More</string>
+    <string name="chat_action_rename_contact">Contact name</string>
+    <string name="chat_action_incognito">Start incognito chat</string>
+    <string name="chat_action_clear_history">Clear chat</string>
+    <string name="action_chat_background">Chat background</string>
+    <string name="chat_status_connecting">Establishing connection…</string>
+    <string name="chat_reply_you">You</string>
+    <string name="chat_action_attach">Attach</string>
+    <string name="chat_action_photo">Photo</string>
+    <string name="chat_action_video_attach">Video</string>
+    <string name="chat_action_file">File</string>
+    <string name="chat_recording_indicator">● Recording </string>
+    <string name="chat_input_hint">Message</string>
+    <string name="chat_action_send">Send</string>
+    <string name="chat_action_voice_message">Voice message</string>
+    <string name="chat_image_saved">Image saved</string>
+    <string name="chat_image_save_failed">Failed to save image</string>
+
+    <!-- Message actions dialog -->
+    <string name="dialog_message_title">Message</string>
+    <string name="message_action_edit">Edit</string>
+    <string name="message_action_reply">Reply</string>
+    <string name="message_action_delete_for_me">Delete for me</string>
+    <string name="message_action_delete_for_all">Delete for everyone</string>
+    <string name="message_edited_suffix">edited</string>
+    <string name="chat_editing_label">Editing</string>
+    <string name="error_edit_message_failed">Failed to edit message</string>
+
+    <!-- Clear chat dialog -->
+    <string name="dialog_clear_confirm_title">Clear chat?</string>
+    <string name="dialog_clear_confirm_text">All message history will be deleted only for you.</string>
+    <string name="dialog_clear_confirm_button">Clear</string>
+
+    <!-- Incognito dialog -->
+    <string name="dialog_incognito_title">Incognito chat</string>
+    <string name="dialog_incognito_text">Show this QR to your contact.\nThe session will not be linked to your main ID.</string>
+
+    <!-- Add contact / open link -->
+    <string name="dialog_add_contact_title">Add contact?</string>
+    <string name="dialog_open_link_title">Open link?</string>
+    <string name="dialog_add_contact_button">Add</string>
+    <string name="dialog_contact_alias_title">Contact name</string>
+    <string name="dialog_contact_alias_label">Local name</string>
+    <string name="dialog_contact_alias_hint">Leave empty to use the contact profile name.</string>
+    <string name="dialog_open_link_button">Open</string>
+
+    <!-- Media messages -->
+    <string name="audio_action_pause">Pause</string>
+    <string name="audio_action_play">Play</string>
+    <string name="message_type_voice">Voice message</string>
+    <string name="message_type_video">Video</string>
+    <string name="conversation_preview_no_messages">No messages</string>
+    <string name="conversation_preview_message">Message</string>
+    <string name="conversation_preview_call">Call</string>
+    <string name="conversation_preview_group_audio_call">Group call</string>
+    <string name="conversation_preview_group_video_call">Group video call</string>
+    <string name="conversation_preview_group_invite">Group invite</string>
+    <string name="video_action_watch">Watch</string>
+
+    <!-- Group chat -->
+    <string name="group_action_add_member">Add member</string>
+    <string name="group_member_slots">Spots available: </string>
+    <string name="group_contacts_header">Your contacts:</string>
+    <string name="group_manual_entry">Or enter Peer ID manually:</string>
+    <string name="group_manual_input_hint">Enter member\'s Peer ID:</string>
+    <string name="group_action_group_call">Group call</string>
+    <string name="group_menu_members">Members</string>
+    <string name="group_action_leave">Leave group</string>
+    <string name="group_member_count">members</string>
+    <string name="group_info_members_header">Members:</string>
+    <string name="group_member_role_owner">Owner</string>
+    <string name="group_member_role_admin">Admin</string>
+    <string name="dialog_leave_confirm_title">Leave group?</string>
+    <string name="dialog_leave_confirm_text">You will no longer receive messages from this group.</string>
+    <string name="dialog_leave_confirm_button">Leave</string>
+    <string name="status_loading">Loading…</string>
+
+    <!-- Date separators -->
+    <string name="date_today">Today</string>
+    <string name="date_yesterday">Yesterday</string>
+
+    <!-- Pattern login -->
+    <string name="pattern_login_title">Enter your pattern</string>
+    <string name="pattern_login_subtitle">Reproduce the pattern you created during registration.</string>
+    <string name="pattern_login_forgot">I forgot my pattern</string>
+    <string name="lockout_countdown_prefix">Wait </string>
+
+    <!-- Pattern registration -->
+    <string name="pattern_register_step1_title">Create a pattern</string>
+    <string name="pattern_register_step1_subtitle">Select exactly 16 cells.\nTap a cell again to change its color (3 colors available).\nThis is your visual password — remember it.</string>
+    <string name="pattern_register_step1_hint">Tap: set (color 1) → color 2 → color 3 → remove.</string>
+    <string name="pattern_register_step2_title">Confirm pattern</string>
+    <string name="pattern_register_step2_subtitle">Draw the same pattern with the same colors.</string>
+
+    <!-- Profile creation -->
+    <string name="profile_name_title">Your name</string>
+    <string name="profile_name_subtitle">This name will be visible to your contacts.\nYou can change it later.</string>
+    <string name="profile_name_hint">Name / nickname</string>
+    <string name="profile_creating_title">Creating profile…</string>
+    <string name="profile_creating_subtitle">This will take a few seconds</string>
+    <string name="profile_created_title">Profile created!</string>
+
+    <!-- PIN login -->
+    <string name="pin_login_prompt">Enter PIN code</string>
+    <string name="pin_login_use_pattern">Log in with pattern</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_section_avatar">Avatar</string>
+    <string name="settings_my_avatar">My avatar</string>
+    <string name="settings_my_avatar_desc">Displayed next to your profile</string>
+    <string name="settings_section_lock">App lock</string>
+    <string name="settings_pin_set">PIN code set</string>
+    <string name="settings_pin">PIN code</string>
+    <string name="settings_pin_set_desc">Tap to change or disable</string>
+    <string name="settings_pin_unset_desc">Quick login without pattern</string>
+    <string name="settings_pin_disable">Disable PIN</string>
+    <string name="settings_pin_need_pattern">Log in with pattern to activate PIN</string>
+    <string name="settings_section_notifications">Notifications</string>
+    <string name="settings_notif_content">Show content</string>
+    <string name="settings_notif_content_desc">Sender name and text in notifications (disable for enhanced privacy)</string>
+    <string name="settings_screenshots">Allow screenshots</string>
+    <string name="settings_screenshots_desc">Allow screenshots and recent apps preview</string>
+    <string name="settings_section_data_retention">Data &amp; Retention</string>
+    <string name="settings_auto_wipe">Self-Destruct (Inactivity)</string>
+    <string name="settings_auto_wipe_desc">Wipes all data if app is not opened for specified days (0 to disable)</string>
+    <string name="settings_cache_limit">Max Cache Size (MB)</string>
+    <string name="settings_cache_limit_desc">Limit for media attachments cache</string>
+    <string name="settings_attachment_age">Attachment Retention (Days)</string>
+    <string name="settings_attachment_age_desc">Pulls old media files from cache</string>
+    
+    <string name="settings_section_clean_pin">Decoy (clean PIN)</string>
+    <string name="settings_clean_pin_active">Clean PIN active</string>
+    <string name="settings_clean_pin">Clean PIN</string>
+    <string name="settings_clean_pin_desc">Opens an empty messenger without messages under duress</string>
+    <string name="settings_clean_pin_disable">Disable clean PIN</string>
+    <string name="settings_section_kill_pin">Data destruction code</string>
+    <string name="settings_kill_pin_active">Destruction code active</string>
+    <string name="settings_kill_pin">Destruction code</string>
+    <string name="settings_kill_pin_desc">Irreversibly deletes all app data when this PIN is entered</string>
+    <string name="settings_kill_pin_disable">Disable destruction code</string>
+    <string name="settings_section_appearance">Appearance</string>
+    <string name="settings_theme">Theme</string>
+    <string name="settings_theme_system">System</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_theme_dialog_title">Choose theme</string>
+    <string name="settings_dynamic_color">Dynamic colors</string>
+    <string name="settings_dynamic_color_desc">Material You — colors from wallpaper</string>
+    <string name="settings_section_language">Language</string>
+    <string name="settings_language">App language</string>
+    <string name="settings_language_system">System</string>
+    <string name="settings_language_dialog_title">Choose language</string>
+    <string name="settings_section_storage">Storage</string>
+    <string name="settings_cache_label">Media cache</string>
+    <string name="settings_cache_desc">Cached images, videos, and files</string>
+    <string name="settings_cache_clear">Clear cache</string>
+    <string name="settings_cache_cleared">Cache cleared</string>
+    <string name="settings_cache_size">%s used</string>
+    <string name="settings_section_recovery">Recovery</string>
+    <string name="settings_recovery_code">Show recovery code</string>
+    <string name="settings_recovery_code_desc">Restores the same identity on a new device without chat history</string>
+    <string name="settings_recovery_export">Export recovery bundle</string>
+    <string name="settings_recovery_export_desc">Encrypted backup with chats, contacts, and local session state for another device</string>
+    <string name="settings_section_about">About</string>
+    <string name="settings_about_desc">Encrypted P2P messenger\nVersion 1.0.0</string>
+    <string name="settings_pin_dialog_set">Set PIN</string>
+    <string name="settings_pin_dialog_change">Change PIN</string>
+    <string name="settings_pin_dialog_disable">Disable PIN</string>
+    <string name="settings_pin_enter_current">Enter current PIN to confirm:</string>
+    <string name="settings_pin_label_current">Current PIN</string>
+    <string name="settings_pin_label_new">New PIN (4 digits)</string>
+    <string name="settings_pin_label_repeat">Repeat PIN</string>
+    <string name="settings_pin_label_4digits">PIN (4 digits)</string>
+    <string name="button_save">Save</string>
+
+    <!-- Non-composable: foreground service / locked notification -->
+    <string name="notification_locked_title">ADA is locked</string>
+    <string name="notification_locked_text">Open the app to receive messages</string>
+    <string name="notification_channel_messages_name">Messages</string>
+    <string name="notification_channel_calls_name">Incoming calls</string>
+
+    <!-- Onboarding (create profile page) -->
+    <string name="onboarding_create_profile_title">Create profile</string>
+
+    <!-- Pattern login (remaining) -->
+    <string name="pattern_login_lockout_seconds">Wait %ds</string>
+    <string name="pattern_login_enter">Log in</string>
+
+    <!-- Pattern registration (remaining) -->
+    <string name="pattern_register_step2_next">Confirm</string>
+    <string name="recovery_import_open_button">Recover account</string>
+
+    <!-- Profile creation (remaining) -->
+    <string name="profile_create_button">Create profile</string>
+
+    <!-- Pin login (remaining) -->
+    <string name="pin_login_use_pattern_button">Log in with pattern</string>
+
+    <!-- Calls -->
+    <string name="calls_no_active">No active calls</string>
+
+    <!-- Bridge screen -->
+    <string name="bridge_title">Anti-censorship</string>
+    <string name="bridge_censorship_level">Censorship level: %s</string>
+    <string name="bridge_level_none">No censorship detected</string>
+    <string name="bridge_level_light">Light — minor filtering or transient probe failures</string>
+    <string name="bridge_level_moderate">Moderate — partial hostname or CDN reachability issues</string>
+    <string name="bridge_level_heavy">Heavy — probes suggest aggressive filtering</string>
+    <string name="bridge_level_extreme">Extreme — probes suggest allowlist filtering or deep inspection</string>
+    <string name="bridge_level_unknown">Unknown</string>
+    <string name="bridge_recheck">Recheck</string>
+    <string name="bridge_mode_title">Connection mode</string>
+    <string name="bridge_mode_auto">Auto</string>
+    <string name="bridge_mode_auto_desc">Automatic detection (recommended)</string>
+    <string name="bridge_mode_none">Direct</string>
+    <string name="bridge_mode_none_desc">No obfuscation, fastest speed</string>
+    <string name="bridge_mode_padding">Padding</string>
+    <string name="bridge_mode_padding_desc">Random noise added to traffic</string>
+    <string name="bridge_mode_shaping">Shaping</string>
+    <string name="bridge_mode_shaping_desc">Traffic looks like regular browsing</string>
+    <string name="bridge_mode_websocket">WebSocket</string>
+    <string name="bridge_mode_websocket_desc">Tunnels traffic through HTTPS</string>
+    <string name="bridge_mode_fronting">Domain fronting</string>
+    <string name="bridge_mode_fronting_desc">Hides behind CDN (e.g. Cloudflare)</string>
+    <string name="bridge_profile_title">Connection profile</string>
+    <string name="bridge_profile_auto">Auto</string>
+    <string name="bridge_profile_auto_desc">Default profile. ADA adapts routing to the current network.</string>
+    <string name="bridge_profile_normal">Normal</string>
+    <string name="bridge_profile_normal_desc">Fastest regular mode for open networks with direct iroh allowed.</string>
+    <string name="bridge_profile_mobile_saver">Mobile saver</string>
+    <string name="bridge_profile_mobile_saver_desc">Reduces background polling for mobile data and battery.</string>
+    <string name="bridge_profile_censored_light">Censored light</string>
+    <string name="bridge_profile_censored_light_desc">Keeps direct routes available while preferring bridge-aware fallback.</string>
+    <string name="bridge_profile_censored_heavy">Censored heavy</string>
+    <string name="bridge_profile_censored_heavy_desc">Disables direct live iroh and uses bridge, mailbox, or local queue routes.</string>
+    <string name="bridge_profile_allowlist_only">Allowlist only</string>
+    <string name="bridge_profile_allowlist_only_desc">HTTPS/mailbox-first behavior for networks where only approved sites work.</string>
+    <string name="bridge_profile_incident_safe">Incident safe</string>
+    <string name="bridge_profile_incident_safe_desc">Most conservative mode for raids, outages, or hostile temporary conditions.</string>
+    <string name="bridge_relay_only_title">Relay-only routing</string>
+    <string name="bridge_relay_only_desc">When enabled, ADA stops using live iroh for direct messages and allows only bridge, mailbox, or local queue routes.</string>
+    <string name="bridge_relay_only_profile_forced">Forced by connection profile. Switch to Auto or Normal to change manually.</string>
+    <string name="bridge_runtime_title">Runtime status</string>
+    <string name="bridge_runtime_profile_label">Profile: %1$s</string>
+    <string name="bridge_runtime_stack_label">Transport stack: %1$s</string>
+    <string name="bridge_runtime_stack_iroh_only">iroh-only</string>
+    <string name="bridge_runtime_stack_iroh_bridge_mailbox">iroh + bridge + mailbox</string>
+    <string name="bridge_runtime_visibility_label">Route visibility</string>
+    <string name="bridge_runtime_visibility_iroh_live_or_offline_queue">This build distinguishes live iroh delivery from local queueing, but not direct path vs iroh relay.</string>
+    <string name="bridge_runtime_visibility_iroh_bridge_mailbox_or_offline_queue">This build distinguishes live iroh, live bridge delivery, bridge mailbox delivery, and local queueing.</string>
+    <string name="bridge_relay_only_scope_label">Relay-only behavior</string>
+    <string name="bridge_relay_only_scope_disabled">When off, live iroh delivery is allowed.</string>
+    <string name="bridge_relay_only_scope_queue_only">When on, live iroh delivery is disabled and new outgoing messages are queued locally until a non-direct path exists.</string>
+    <string name="bridge_relay_only_scope_bridge_or_mailbox_only">When on, live iroh delivery is disabled. ADA may still use bridge or mailbox routes if they are available.</string>
+    <string name="bridge_last_outcome_label">Last delivery outcome</string>
+    <string name="bridge_last_outcome_none">No delivery outcome recorded yet.</string>
+    <string name="bridge_last_outcome_iroh_live">Sent over live iroh.</string>
+    <string name="bridge_last_outcome_bridge_websocket_tls">Sent over a live WebSocket bridge.</string>
+    <string name="bridge_last_outcome_bridge_domain_front">Sent over a live domain-fronted bridge.</string>
+    <string name="bridge_last_outcome_bridge_meek">Sent over a live meek-style bridge.</string>
+    <string name="bridge_last_outcome_bridge_obfs4">Sent over a live obfs4-style bridge.</string>
+    <string name="bridge_last_outcome_local_mesh">Sent over local mesh.</string>
+    <string name="bridge_last_outcome_mailbox_bridge">Accepted by the bridge mailbox for later delivery.</string>
+    <string name="bridge_last_outcome_offline_queue">Queued locally because live delivery failed.</string>
+    <string name="bridge_last_outcome_relay_only_deferred">Queued locally because relay-only is enabled.</string>
+    <string name="bridge_last_outcome_failed">Delivery failed before the message could be queued.</string>
+    <string name="bridge_listener_label">Bridge listener</string>
+    <string name="bridge_listener_connected">Connected and listening through %1$s.</string>
+    <string name="bridge_listener_disconnected">No live bridge listener session is active.</string>
+    <string name="bridge_mailbox_depth_label">Mailbox depth: %1$d</string>
+    <string name="bridge_capability_calls_label">Call capability</string>
+    <string name="bridge_capability_calls_available">Realtime call signaling is currently allowed.</string>
+    <string name="bridge_capability_calls_unavailable">Calls are disabled in the current censorship-safe route.</string>
+    <string name="bridge_capability_attachments_label">Attachment capability</string>
+    <string name="bridge_capability_attachments_available">Large attachments may use the direct iroh/blob path.</string>
+    <string name="bridge_capability_attachments_limited">Large attachments are limited. Current censorship-safe cap: %1$s bytes.</string>
+    <string name="bridge_manifest_label">Bridge manifest</string>
+    <string name="bridge_manifest_summary">Manifest v%1$s, %2$s bridge(s), source: %3$s.</string>
+    <string name="bridge_manifest_absent">No verified bridge manifest is loaded.</string>
+    <string name="bridge_manifest_import_title">Manifest bootstrap</string>
+    <string name="bridge_manifest_import_desc">Import a signed bridge manifest from pasted JSON, an ada:// bridge link, a file, or a QR code. If this device has no pinned manifest key yet, include the trusted Ed25519 public key once during bootstrap.</string>
+    <string name="bridge_manifest_import_paste_button">Paste link or JSON</string>
+    <string name="bridge_manifest_import_file_button">Load from file</string>
+    <string name="bridge_manifest_import_qr_button">Scan QR manifest</string>
+    <string name="bridge_manifest_import_dialog_title">Import bridge manifest</string>
+    <string name="bridge_manifest_import_input_label">Signed manifest or ada://bridge-manifest link</string>
+    <string name="bridge_manifest_import_input_hint">Paste a SignedBridgeManifest JSON payload, an https:// manifest URL, or an ada://bridge-manifest bootstrap link.</string>
+    <string name="bridge_manifest_import_key_label">Trusted public key</string>
+    <string name="bridge_manifest_import_key_hint">Optional if this device already has the manifest signer pinned. Otherwise paste the 32-byte Ed25519 public key in hex once.</string>
+    <string name="bridge_manifest_import_loaded_from">Loaded from: %1$s</string>
+    <string name="bridge_manifest_import_confirm">Import manifest</string>
+    <string name="bridge_manifest_import_invalid">The manifest input is not recognized. Use signed manifest JSON, an https:// URL, or an ada://bridge-manifest link.</string>
+    <string name="bridge_manifest_import_failed">Bridge manifest import failed.</string>
+    <string name="bridge_manifest_import_failed_with_reason">Bridge manifest import failed: %1$s</string>
+    <string name="bridge_manifest_import_read_failed">The selected manifest file could not be read.</string>
+    <string name="bridge_manifest_import_success">Bridge manifest imported from %1$s.</string>
+    <string name="bridge_manifest_import_source_manual">manual input</string>
+    <string name="bridge_manifest_import_source_file">manifest file</string>
+    <string name="bridge_manifest_import_source_deeplink">bridge link</string>
+    <string name="bridge_manifest_import_source_qr">QR import</string>
+    <string name="bridge_manifest_import_clean_unavailable">Bridge manifest import is unavailable in clean mode.</string>
+    <string name="bridge_runtime_unknown">Unknown</string>
+    <string name="bridge_bridges_title">Bridges</string>
+    <string name="bridge_no_bridges">No bridges added. Tap + to add one.</string>
+    <string name="bridge_status_online">Online</string>
+    <string name="bridge_status_offline">Offline</string>
+    <string name="bridge_add_title">Add bridge</string>
+    <string name="bridge_add_hint">Bridge line</string>
+    <string name="bridge_add_example">Paste a bridge line, for example:\nwebsocket ada-edge.example.workers.dev:443 fp=1111111111111111111111111111111111111111111111111111111111111111 host=ada-edge.example.workers.dev wire=json</string>
+    <string name="bridge_add_button">Add</string>
+    <string name="bridge_add_success">Bridge added.</string>
+    <string name="bridge_add_failed">Bridge line was rejected.</string>
+    <string name="bridge_add_failed_with_reason">Bridge line was rejected: %1$s</string>
+    <string name="bridge_add_invalid">Bridge line is empty or too long.</string>
+    <string name="bridge_tip">Tip: Most users don\'t need to change these settings. If you\'re in a country with internet censorship, set the mode to \"Auto\" and the app will configure itself.</string>
+    <string name="recovery_password_label">Recovery password</string>
+    <string name="recovery_password_hint">Use the same password when importing on the new device (minimum 8 characters).</string>
+    <string name="recovery_export_dialog_title">Export recovery bundle</string>
+    <string name="recovery_export_dialog_text">This creates an encrypted backup with your identity, contacts, chat history, and local session state. Media cache is not included. After import, enter the original pattern on the new device.</string>
+    <string name="recovery_export_saved">Recovery bundle exported.</string>
+    <string name="recovery_export_failed">Failed to export the recovery bundle.</string>
+    <string name="recovery_code_dialog_title">Recovery code</string>
+    <string name="recovery_code_dialog_text">Store this code offline. It restores the same peer ID on a new device, but does not include chat history. For a full transfer with messages, export a recovery bundle too.</string>
+    <string name="recovery_code_copied">Recovery code copied.</string>
+    <string name="recovery_import_title">Import recovery bundle</string>
+    <string name="recovery_import_subtitle">Choose whether to restore from an encrypted recovery file or from a recovery code.</string>
+    <string name="recovery_import_note">After import you will still need to enter the original pattern to unlock the recovered account.</string>
+    <string name="recovery_import_tab_file">Recovery file</string>
+    <string name="recovery_import_tab_code">Recovery code</string>
+    <string name="recovery_import_file_note">The recovery file restores identity, chats, contacts, and local delivery/session state. Media cache is not included.</string>
+    <string name="recovery_import_code_note">The recovery code restores only the identity. Chat history and local cached state are not included.</string>
+    <string name="recovery_import_pick_file">Choose recovery file</string>
+    <string name="recovery_import_selected_file">Selected file: %s</string>
+    <string name="recovery_import_unknown_file">unknown</string>
+    <string name="recovery_import_no_file">No recovery file selected yet.</string>
+    <string name="recovery_import_code_label">Recovery code</string>
+    <string name="recovery_import_code_hint">Paste or type the grouped code exactly as you saved it.</string>
+    <string name="recovery_import_display_name_label">Display name</string>
+    <string name="recovery_import_display_name_hint">This can be changed later after login.</string>
+    <string name="recovery_import_confirm_button">Import and continue</string>
+    <string name="recovery_import_code_confirm_button">Restore identity and continue</string>
+    <string name="recovery_import_failed">Failed to import the recovery bundle.</string>
+
+    <!-- Connection status bar -->
+    <string name="conn_green">Connected</string>
+    <string name="conn_yellow">Connected — delays possible</string>
+    <string name="conn_orange">Limited — calls unavailable</string>
+    <string name="conn_red">No connection</string>
+    <string name="conn_with_route">%1$s - %2$s</string>
+    <string name="conn_route_iroh_live">live iroh</string>
+    <string name="conn_route_bridge">bridge</string>
+    <string name="conn_route_local_mesh">local mesh</string>
+    <string name="conn_route_mailbox">mailbox</string>
+    <string name="conn_route_offline_queue">queued</string>
+    <string name="conn_route_relay_only_deferred">queued relay-only</string>
+    <string name="conn_route_failed">failed</string>
+
+    <string name="peer_presence_live">live on iroh</string>
+    <string name="peer_presence_not_live">not on live iroh</string>
+
+    <string name="dialog_open_link_warning">Warning: Opening this link will use your direct internet connection, revealing your IP address to the site and bypassing the secure bridge network.</string>
+
+    <!-- Main screen -->
+    <string name="nav_chats">Chats</string>
+    <string name="nav_calls">Calls</string>
+    <string name="cd_search">Search</string>
+    <string name="cd_my_qr">My QR code</string>
+    <string name="cd_scan_qr">Scan QR code</string>
+    <string name="cd_new_group">New group</string>
+    <string name="cd_new_chat">New chat</string>
+    <string name="search_chats_hint">Search chats…</string>
+    <string name="main_no_chats">No chats</string>
+    <string name="main_no_chats_hint">Tap + to start a chat</string>
+    <string name="action_delete">Delete</string>
+    <string name="dialog_delete_chat_title">Delete chat?</string>
+    <string name="dialog_delete_chat_text">Chat with «%s» and all messages will be deleted from this device.</string>
+    <string name="dialog_my_contact_title">My contact</string>
+    <string name="dialog_my_contact_desc">Show this QR to your contact,\nso they can add you as a contact.</string>
+    <string name="dialog_share_contact_link">Share link</string>
+    <string name="dialog_share_contact_chooser">Share contact</string>
+    <string name="dialog_profile_not_loaded">Profile not loaded yet.</string>
+    <string name="dialog_new_chat_title">New chat</string>
+    <string name="dialog_new_chat_label">ADA link or contact JSON</string>
+    <string name="dialog_new_chat_hint">Paste ada://s/… or ada://add-contact?…</string>
+    <string name="dialog_new_chat_scan_qr">Scan QR contact</string>
+    <string name="dialog_new_chat_create_group">Create group</string>
+    <string name="dialog_new_chat_start">Start chat</string>
+    <string name="error_clean_mode_no_contacts">Adding contacts is unavailable in clean mode</string>
+    <string name="error_invalid_contact_link">Paste an ADA link or contact JSON</string>
+
+    <!-- Settings -->
+    <string name="settings_section_communication">Communication</string>
+    <string name="settings_mesh_subtitle">Direct P2P via Bluetooth and Wi-Fi Direct without servers</string>
+    <string name="settings_custom_bootstrap">Custom bridge bootstrap</string>
+    <string name="settings_custom_bootstrap_desc">Add your own bridge manifest URL and trusted public key.</string>
+    <string name="settings_custom_bootstrap_configured">Manifest: %1$s</string>
+    <string name="settings_custom_bootstrap_dialog_title">Custom bridge bootstrap</string>
+    <string name="settings_custom_bootstrap_dialog_desc">Use this only if you have a trusted manifest URL from your own bridge operator.</string>
+    <string name="settings_custom_bootstrap_url_label">Manifest URL</string>
+    <string name="settings_custom_bootstrap_url_hint">https://example.com/manifest.json</string>
+    <string name="settings_custom_bootstrap_key_label">Trusted public key</string>
+    <string name="settings_custom_bootstrap_key_hint">32-byte Ed25519 public key in hex. Optional after the signer is pinned.</string>
+    <string name="settings_custom_bootstrap_saved">Bridge manifest imported.</string>
+    <string name="settings_custom_bootstrap_cleared">Saved bootstrap fields cleared.</string>
+    <string name="settings_auto_wipe_dialog_hint">Enter number of days. 0 disables auto-wipe.</string>
+    <string name="settings_auto_wipe_dialog_error">Enter 0 or a positive number of days</string>
+    <string name="error_pin_wrong">Incorrect PIN</string>
+    <string name="error_pin_wrong_current">Incorrect current PIN</string>
+    <string name="error_pin_no_pattern_data">No data &#8212; log in with pattern</string>
+</resources>

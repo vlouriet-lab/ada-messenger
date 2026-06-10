@@ -1,0 +1,29 @@
+# cbindgen configuration for generating iOS/Swift C headers from ada-core FFI
+# Run: cbindgen --config cbindgen.toml --crate ada-core --output ada_core.h
+
+language = "C"
+pragma_once = true
+
+[export]
+# Only export symbols starting with ada_ (our FFI API)
+include = ["ada_core_create", "ada_core_free", "ada_get_peer_id",
+           "ada_get_display_name", "ada_send_text", "ada_string_free",
+           "ada_get_conversations_json", "ada_get_messages_json",
+           "ada_poll_event_json", "ada_mark_read",
+           "ada_call_audio", "ada_call_video", "ada_answer_call",
+           "ada_hangup", "ada_get_active_calls_json",
+           "ada_send_file_bytes", "ada_get_transfers_json", "ada_cancel_transfer",
+           "ada_add_bridge", "ada_get_bridge_status_json",
+           "ada_detect_censorship_json", "ada_set_bridge_mode",
+           "ada_set_event_callback", "ada_clear_event_callback",
+           "AdaResult", "AdaCoreHandle", "AdaEventCallback"]
+
+[parse]
+parse_deps = false
+
+[fn]
+# Annotate all exported functions as nullable-result where applicable
+rename_args = "GeckoCase"
+
+[defines]
+"feature = jni-bindings" = "ADA_JNI"

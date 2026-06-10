@@ -1,0 +1,19 @@
+# Release keystore — содержит приватный ключ подписи, не коммитить
+*.jks
+*.keystore
+
+# Локальные настройки машины (пути SDK, пароли)
+local.properties
+
+# Runtime databases — содержат сообщения пользователей, не коммитить
+*.db
+*.db-wal
+*.db-shm
+
+# Gradle build cache
+.gradle/
+build/
+
+# Android Studio project files
+*.iml
+.idea/

@@ -1,0 +1,260 @@
+name: Build & Release ADA Android APK
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-core:
+    name: Build Rust Core
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - aarch64-linux-android
+          - armv7-linux-androideabi
+          - x86_64-linux-android
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          working-directory: ada-core
+
+      - name: Install Android NDK
+        uses: ndk-build/ndk-build@v1.2
+        with:
+          ndk-version: r26b
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
+      - name: Build Rust core (${{ matrix.target }})
+        working-directory: ada-core
+        run: |
+          cargo ndk -t ${{ matrix.target }} build --features mobile --release
+          ls -lh target/${{ matrix.target }}/release/libada_core.so
+
+      - name: Upload .so artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libada_core-${{ matrix.target }}
+          path: ada-core/target/${{ matrix.target }}/release/libada_core.so
+          retention-days: 1
+
+  build-android-app:
+    name: Build Android App
+    runs-on: ubuntu-latest
+    needs: build-core
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: temurin
+
+      - name: Download Rust artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Organize .so files
+        run: |
+          mkdir -p android-app/app/src/main/jniLibs/arm64-v8a
+          mkdir -p android-app/app/src/main/jniLibs/armeabi-v7a
+          mkdir -p android-app/app/src/main/jniLibs/x86_64
+          
+          cp artifacts/libada_core-aarch64-linux-android/libada_core.so \
+             android-app/app/src/main/jniLibs/arm64-v8a/
+          cp artifacts/libada_core-armv7-linux-androideabi/libada_core.so \
+             android-app/app/src/main/jniLibs/armeabi-v7a/
+          cp artifacts/libada_core-x86_64-linux-android/libada_core.so \
+             android-app/app/src/main/jniLibs/x86_64/
+          
+          ls -lh android-app/app/src/main/jniLibs/**/*.so
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build debug APK
+        working-directory: android-app
+        run: |
+          ./gradlew assembleDebug --info
+
+      - name: Build release APK (unsigned)
+        working-directory: android-app
+        run: |
+          ./gradlew assembleRelease --info
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ada-messenger-debug
+          path: android-app/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ada-messenger-release-unsigned
+          path: android-app/app/build/outputs/apk/release/app-release-unsigned.apk
+
+  test-core:
+    name: Test Rust Core
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          working-directory: ada-core
+
+      - name: Run tests
+        working-directory: ada-core
+        run: cargo test --no-default-features --features mobile-dev --lib --tests -- --nocapture
+
+      - name: Run standard integration tests
+        working-directory: ada-core
+        run: cargo test --no-default-features --features mobile-dev --test integration -- --nocapture --skip hostile_network_
+
+      - name: Run hostile-network harness
+        working-directory: ada-core
+        run: cargo test --no-default-features --features mobile-dev --test integration hostile_network_ -- --nocapture
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          working-directory: ada-core
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Run cargo audit
+        working-directory: ada-core
+        run: cargo audit --deny warnings
+
+      - name: Check for unsafe code
+        working-directory: ada-core
+        run: |
+          cargo install cargo-geiger --locked
+          cargo geiger --output Json
+
+  lint-android:
+    name: Lint Android App
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: temurin
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Run Android lint
+        working-directory: android-app
+        run: ./gradlew :app:lintDebug --info
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build-android-app, test-core, security-audit, lint-android]
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create Release Notes
+        run: |
+          cat > RELEASE_NOTES.md << 'EOF'
+          # ADA Messenger Release ${{ github.ref_name }}
+          
+          ## Changes
+          - See git log for detailed commits
+          
+          ## Artifacts
+          - `ada-messenger-debug.apk` — Debug build for testing
+          - `ada-messenger-release-unsigned.apk` — Release build (requires signing)
+          
+          ## Installation
+          ```bash
+          adb install -r ada-messenger-debug.apk
+          ```
+          
+          ## Build System
+          - Rust core: ada-core (v0.1.0)
+          - Android: Kotlin + Compose
+          - Supported ABIs: arm64-v8a, armeabi-v7a, x86_64
+          EOF
+
+      - name: GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            ada-messenger-debug/ada-messenger-debug.apk
+            ada-messenger-release-unsigned/ada-messenger-release-unsigned.apk
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  notify:
+    name: Notify on Build Status
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [build-core, build-android-app, test-core]
+
+    steps:
+      - name: Build Status
+        run: |
+          if [ "${{ needs.build-core.result }}" = "success" ] && \
+             [ "${{ needs.build-android-app.result }}" = "success" ] && \
+             [ "${{ needs.test-core.result }}" = "success" ]; then
+            echo "✅ All checks passed"
+            exit 0
+          else
+            echo "❌ Build or tests failed"
+            exit 1
+          fi

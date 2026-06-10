@@ -1,0 +1,65 @@
+syntax = "proto3";
+package ada;
+
+// Wire message envelope (transmitted over the network)
+message WireEnvelope {
+    uint32 version       = 1;
+    bytes  recipient_id  = 2;   // 32 bytes
+    bytes  sender_id     = 3;   // 32 bytes
+    bytes  payload       = 4;   // bincode-serialized WireMessage
+    bytes  signature     = 5;   // Ed25519 signature of payload
+    uint32 message_type  = 6;   // 0=direct, 1=group, 2=relay, 3=control
+}
+
+// Relay delivery wrapper (stored by relay nodes)
+message RelayEnvelope {
+    bytes  recipient_id  = 1;   // 32 bytes
+    bytes  message_id    = 2;   // 16 bytes
+    bytes  payload       = 3;   // encrypted WireEnvelope
+    uint64 expires_at    = 4;   // Unix timestamp
+    uint32 hops          = 5;
+}
+
+// Pre-key bundle announcement (published to DHT)
+message PreKeyAnnouncement {
+    bytes  peer_id          = 1;   // 32 bytes
+    bytes  ik_public        = 2;   // 32 bytes (X25519)
+    bytes  spk_public       = 3;   // 32 bytes
+    bytes  spk_signature    = 4;   // 64 bytes (Ed25519)
+    bytes  opk_public       = 5;   // 32 bytes (optional)
+    uint32 opk_id           = 6;
+    uint64 timestamp        = 7;
+    bytes  signing_public   = 8;   // 32 bytes (Ed25519 identity key)
+    bytes  announcement_sig = 9;   // signature of the bundle
+    string display_name     = 10;
+}
+
+// Group message (iroh unicast fan-out)
+message GroupMessage {
+    bytes  group_id         = 1;   // 16 bytes
+    bytes  sender_id        = 2;   // 32 bytes
+    uint32 sender_key_iter  = 3;
+    bytes  ciphertext       = 4;
+    bytes  nonce            = 5;   // 12 bytes
+    bytes  signing_public   = 6;   // 32 bytes
+    bytes  signature        = 7;   // 64 bytes
+    uint64 timestamp_ms     = 8;
+}
+
+// ICE candidate (for call signaling)
+message IceCandidate {
+    bytes  call_id          = 1;   // 16 bytes
+    string candidate        = 2;
+    string sdp_mid          = 3;
+    uint32 sdp_mline_index  = 4;
+}
+
+// File chunk
+message FileChunkProto {
+    bytes  transfer_id      = 1;   // 16 bytes
+    uint32 index            = 2;
+    uint32 total            = 3;
+    bytes  nonce            = 4;   // 12 bytes
+    bytes  ciphertext       = 5;
+    bytes  chunk_checksum   = 6;   // 32 bytes (blake3)
+}

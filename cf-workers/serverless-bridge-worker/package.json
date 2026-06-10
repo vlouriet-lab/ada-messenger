@@ -1,0 +1,16 @@
+{
+  "name": "ada-serverless-bridge-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check index.js",
+    "dry-run": "wrangler deploy --dry-run",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@noble/ed25519": "^2.1.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.12.0"
+  }
+}

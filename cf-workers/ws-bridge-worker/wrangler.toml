@@ -1,0 +1,14 @@
+name = "ada-ws-bridge-proxy"
+main = "index.js"
+compatibility_date = "2025-04-01"
+workers_dev = true
+
+[vars]
+BRIDGE_PATH = "/ada"
+
+# Deploy-time variable examples:
+#   wrangler secret put BRIDGE_ORIGIN
+# Value example:
+#   https://bridge-origin.example.com
+# This Worker fronts an existing bridge origin. It is not the fully serverless
+# Durable Objects bridge variant.

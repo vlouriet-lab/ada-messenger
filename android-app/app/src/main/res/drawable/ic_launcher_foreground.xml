@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ADA Messenger launcher icon — unified logo from Logo-01_SIGN_WHITE.svg
+  Outer shape : hexagonal badge from SVG potrace, viewport 108×108
+  Inner shape : shield/teardrop element from SVG
+  Transform   : translate(0,500) scale(0.1,-0.1) → ×0.0216, y=108−y×0.0216
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- ── Scale all content to fit within the adaptive icon safe zone ───── -->
+    <!-- Safe zone: center 66dp of 108dp canvas (21dp inset from each edge)  -->
+    <!-- Scale 0.611 around center (54,54) = scale(0.611) + translate(21,21) -->
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.611"
+        android:scaleY="0.611">
+
+    <!-- ── Outer badge shape ────────────────────────────────────────────────── -->
+    <path
+        android:pathData="M91.584,20.974 C99.36,30.694 105.862,38.858 106.013,39.096 C106.337,39.55 106.79,37.454 99.317,70.416 C97.546,78.322 96.055,84.78 96.055,84.802 C95.926,84.845 68.04,98.258 61.754,101.304 L54.065,105.019 L39.506,97.999 C31.493,94.154 22.075,89.618 18.554,87.934 L12.161,84.845 L11.232,80.827 C10.735,78.602 9.223,71.971 7.884,66.096 C6.523,60.221 4.601,51.818 3.607,47.455 L1.793,39.506 L16.265,21.362 L30.758,3.24 L54.086,3.262 L77.436,3.262 L91.584,20.974 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="11"
+                android:startY="10"
+                android:endX="97"
+                android:endY="94">
+                <item android:offset="0.0" android:color="#FFF5F5F5" />
+                <item android:offset="0.38" android:color="#FFD4D4D4" />
+                <item android:offset="1.0" android:color="#FF8A8A8A" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- ── Inner shield element (depth shadow) ─────────────────────────────── -->
+    <path
+        android:fillColor="#55282828"
+        android:pathData="M51.516,26.266 C44.215,26.827 35.662,28.274 29.225,30.002 L28.296,30.262 L28.296,32.357 C28.296,39.744 29.851,49.399 32.076,55.728 C33.091,58.601 35.467,63.526 36.936,65.772 C40.997,71.971 46.332,76.831 52.769,80.222 L54.259,80.978 L55.145,80.546 C59.962,78.106 65.189,73.915 68.537,69.768 C72.814,64.454 76.032,57.672 77.868,50.004 C79.078,44.906 79.898,38.47 79.92,33.869 L79.92,31.536 L77.933,30.542 C74.304,28.728 69.638,27.367 64.476,26.654 C62.186,26.352 53.762,26.093 51.516,26.266 Z" />
+
+    <!-- ── Outer-edge highlight (top-left rim, white 25% α) ───────────────── -->
+    <path
+        android:fillColor="#40FFFFFF"
+        android:pathData="M30.758,3.24 L54.086,3.262 L77.436,3.262 L91.584,20.974 L99.36,30.694 L91.584,20.974 L77.436,3.262 Z" />
+
+    </group>
+</vector>
