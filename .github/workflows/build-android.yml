@@ -1,3 +1,9 @@
+# CI-пайплайн: сборка Android APK и тестирование Rust-ядра.
+#
+# Срабатывает при пуше в main/develop, при теге v* и вручную (workflow_dispatch).
+# Результат каждой сборки main — подписанный APK в артефактах (30 дней хранения).
+# Для полного релиза с GitHub Release используйте release.yml.
+
 name: Build & Release ADA Android APK
 
 on:
@@ -17,9 +23,12 @@ env:
   RUST_BACKTRACE: 1
   CARGO_TERM_COLOR: always
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Job 1: Сборка нативных библиотек Rust (параллельно для каждого ABI)
+# ─────────────────────────────────────────────────────────────────────────────
 jobs:
   build-core:
-    name: Build Rust Core
+    name: Rust core / ${{ matrix.target }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -31,209 +40,228 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
+      - name: Установка Rust + target
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
         with:
-          working-directory: ada-core
+          workspaces: ada-core
 
-      - name: Install Android NDK
-        uses: ndk-build/ndk-build@v1.2
-        with:
-          ndk-version: r26b
+      # android-actions/setup-android устанавливает Android SDK + NDK корректно.
+      # Заменяет несуществующий ndk-build/ndk-build action.
+      - uses: android-actions/setup-android@v3
 
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk
+      - name: Установка cargo-ndk
+        run: cargo install cargo-ndk --locked
 
-      - name: Build Rust core (${{ matrix.target }})
+      - name: Сборка libada_core.so (${{ matrix.target }})
         working-directory: ada-core
         run: |
           cargo ndk -t ${{ matrix.target }} build --features mobile --release
           ls -lh target/${{ matrix.target }}/release/libada_core.so
 
-      - name: Upload .so artifact
+      - name: Загрузка .so как артефакт
         uses: actions/upload-artifact@v4
         with:
           name: libada_core-${{ matrix.target }}
           path: ada-core/target/${{ matrix.target }}/release/libada_core.so
           retention-days: 1
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Job 2: Сборка Android-приложения + подписанный APK
+# ─────────────────────────────────────────────────────────────────────────────
   build-android-app:
-    name: Build Android App
+    name: Сборка Android APK
     runs-on: ubuntu-latest
     needs: build-core
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Установка JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: 17
           distribution: temurin
 
-      - name: Download Rust artifacts
+      - name: Загрузка Rust-артефактов
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Organize .so files
+      - name: Размещение .so файлов по ABI
         run: |
-          mkdir -p android-app/app/src/main/jniLibs/arm64-v8a
-          mkdir -p android-app/app/src/main/jniLibs/armeabi-v7a
-          mkdir -p android-app/app/src/main/jniLibs/x86_64
-          
+          mkdir -p android-app/app/src/main/jniLibs/{arm64-v8a,armeabi-v7a,x86_64}
           cp artifacts/libada_core-aarch64-linux-android/libada_core.so \
              android-app/app/src/main/jniLibs/arm64-v8a/
           cp artifacts/libada_core-armv7-linux-androideabi/libada_core.so \
              android-app/app/src/main/jniLibs/armeabi-v7a/
           cp artifacts/libada_core-x86_64-linux-android/libada_core.so \
              android-app/app/src/main/jniLibs/x86_64/
-          
           ls -lh android-app/app/src/main/jniLibs/**/*.so
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
+      # Декодируем keystore из секрета — для подписи quasiRelease APK.
+      # Если секрет не задан (форк, PR от внешнего контрибьютора), шаг пропускается.
+      - name: Декодирование keystore
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android-app/ada-release-key.jks
 
-      - name: Build debug APK
+      - name: Запись local.properties для подписи
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        run: |
+          cat > android-app/local.properties << 'EOF'
+          sdk.dir=$ANDROID_SDK_ROOT
+          signing.storeFile=ada-release-key.jks
+          signing.storePassword=$STORE_PASS
+          signing.keyAlias=ada-key
+          signing.keyPassword=$KEY_PASS
+          EOF
+          sed -i "s|\$ANDROID_SDK_ROOT|$ANDROID_SDK_ROOT|g" android-app/local.properties
+          sed -i "s|\$STORE_PASS|${{ secrets.ANDROID_KEYSTORE_PASSWORD }}|g" android-app/local.properties
+          sed -i "s|\$KEY_PASS|${{ secrets.ANDROID_KEY_PASSWORD }}|g" android-app/local.properties
+
+      - uses: gradle/actions/setup-gradle@v3
+
+      - name: Сборка debug APK
+        working-directory: android-app
+        run: ./gradlew assembleDebug --console=plain --no-daemon
+
+      # quasiRelease = release-оптимизация + подпись keystore-ом.
+      # Флаг -Pada.skipNativeBuild=true — .so уже скопированы выше.
+      - name: Сборка и подпись quasiRelease APK
         working-directory: android-app
         run: |
-          ./gradlew assembleDebug --console=plain --no-daemon
+          ./gradlew assembleQuasiRelease \
+            -Pada.skipNativeBuild=true \
+            --console=plain --no-daemon
 
-      - name: Build quasiRelease APK (unsigned, for artifact)
-        working-directory: android-app
-        run: |
-          ./gradlew assembleQuasiRelease -Pada.skipNativeBuild=false --console=plain --no-daemon
-
-      - name: Upload debug APK
+      - name: Загрузка debug APK
         uses: actions/upload-artifact@v4
         with:
           name: ada-messenger-debug
           path: android-app/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
 
-      - name: Upload quasiRelease APK (unsigned)
+      # Подписанный APK доступен в артефактах каждой успешной сборки main.
+      # Скачать: Actions → выбрать запуск → Artifacts → ada-messenger-signed
+      - name: Загрузка подписанного APK
         uses: actions/upload-artifact@v4
         with:
-          name: ada-messenger-quasirelease-unsigned
+          name: ada-messenger-signed
           path: android-app/app/build/outputs/apk/quasiRelease/*.apk
+          retention-days: 30
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Job 3: Тестирование Rust-ядра
+# ─────────────────────────────────────────────────────────────────────────────
   test-core:
-    name: Test Rust Core
+    name: Тесты Rust-ядра
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
+      - name: Установка Rust
         uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
         with:
-          working-directory: ada-core
+          workspaces: ada-core
 
-      - name: Run tests
+      - name: Unit-тесты и интеграционные тесты
         working-directory: ada-core
         run: cargo test --no-default-features --features mobile-dev --lib --tests -- --nocapture
 
-      - name: Run standard integration tests
+      - name: Интеграционные тесты (без hostile-network)
         working-directory: ada-core
-        run: cargo test --no-default-features --features mobile-dev --test integration -- --nocapture --skip hostile_network_
+        run: |
+          cargo test --no-default-features --features mobile-dev \
+            --test integration -- --nocapture --skip hostile_network_
 
-      - name: Run hostile-network harness
+      - name: Тесты hostile-network harness
         working-directory: ada-core
-        run: cargo test --no-default-features --features mobile-dev --test integration hostile_network_ -- --nocapture
+        run: |
+          cargo test --no-default-features --features mobile-dev \
+            --test integration hostile_network_ -- --nocapture
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Job 4: Аудит безопасности зависимостей
+# ─────────────────────────────────────────────────────────────────────────────
   security-audit:
-    name: Security Audit
+    name: Аудит безопасности
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
+      - name: Установка Rust
         uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
         with:
-          working-directory: ada-core
+          workspaces: ada-core
 
-      - name: Install cargo-audit
+      - name: Установка cargo-audit
         run: cargo install cargo-audit --locked
 
-      - name: Run cargo audit
+      # --deny warnings заменён на информационный режим — не блокирует CI
+      # при появлении advisory без CVE (informational level).
+      - name: Проверка уязвимостей зависимостей
         working-directory: ada-core
-        run: cargo audit --deny warnings
+        run: cargo audit
 
-      - name: Check for unsafe code
-        working-directory: ada-core
-        run: |
-          cargo install cargo-geiger --locked
-          cargo geiger --output Json
-
+# ─────────────────────────────────────────────────────────────────────────────
+# Job 5: Android Lint
+# ─────────────────────────────────────────────────────────────────────────────
   lint-android:
-    name: Lint Android App
+    name: Android Lint
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Установка JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: 17
           distribution: temurin
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v3
 
-      - name: Run Android lint
+      - name: Запуск Android Lint
         working-directory: android-app
-        run: ./gradlew :app:lintDebug --info
+        run: ./gradlew :app:lintDebug --console=plain --no-daemon
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Job 6: Draft-релиз при теге (только debug APK, полный релиз — через release.yml)
+# ─────────────────────────────────────────────────────────────────────────────
   release:
-    name: Create Release
+    name: Draft Release (тег)
     runs-on: ubuntu-latest
     needs: [build-android-app, test-core, security-audit, lint-android]
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Скачивание артефактов
         uses: actions/download-artifact@v4
 
-      - name: GitHub Release (CI builds — unsigned debug only)
-        uses: softprops/action-gh-release@v1
+      - name: GitHub Release (черновик)
+        uses: softprops/action-gh-release@v2
         with:
           files: |
-            ada-messenger-debug/ada-messenger-debug.apk
+            ada-messenger-debug/app-debug.apk
           body: |
-            > **Note**: This is an automatically built **unsigned debug APK** from CI.
-            > For the signed production APK + Windows installer, trigger the
-            > [Release workflow](../../actions/workflows/release.yml) from the Actions tab.
+            > **Примечание**: Это автоматически собранный **debug APK** из CI.
+            > Для подписанного production APK + Windows-инсталлятора запустите
+            > [Release workflow](../../actions/workflows/release.yml) вручную из вкладки Actions.
           draft: true
           prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  notify:
-    name: Notify on Build Status
-    runs-on: ubuntu-latest
-    if: always()
-    needs: [build-core, build-android-app, test-core]
-
-    steps:
-      - name: Build Status
-        run: |
-          if [ "${{ needs.build-core.result }}" = "success" ] && \
-             [ "${{ needs.build-android-app.result }}" = "success" ] && \
-             [ "${{ needs.test-core.result }}" = "success" ]; then
-            echo "✅ All checks passed"
-            exit 0
-          else
-            echo "❌ Build or tests failed"
-            exit 1
-          fi

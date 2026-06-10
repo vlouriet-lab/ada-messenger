@@ -87,10 +87,14 @@ proto = []
 bundled-sqlite = ["rusqlite/bundled"]
 # Use SQLCipher with vendored OpenSSL — for production/mobile builds
 sqlcipher = ["rusqlite/bundled-sqlcipher-vendored-openssl"]
-jni-bindings = ["dep:jni", "dep:android_logger", "dep:tracing-log"]
+jni-bindings = ["dep:jni", "dep:tracing-log"]
+# android_logger работает только на Android (linkage с liblog); не включать на desktop/Windows
+android-log = ["dep:android_logger"]
 ffi = []
-mobile = ["proto", "ffi", "jni-bindings", "sqlcipher"]
-mobile-dev = ["proto", "ffi", "jni-bindings", "bundled-sqlite"]
+mobile = ["proto", "ffi", "jni-bindings", "android-log", "sqlcipher"]
+mobile-dev = ["proto", "ffi", "jni-bindings", "android-log", "bundled-sqlite"]
+# desktop = JNI для Compose Desktop на Windows/Linux, без Android-специфичных зависимостей
+desktop = ["proto", "ffi", "jni-bindings", "bundled-sqlite"]
 test-helpers = []
 
 # ── Release profile: optimized for Android .so size ──────────────────────────

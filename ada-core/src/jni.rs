@@ -678,7 +678,9 @@ pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nati
 /// JNI contract: called once by the JVM on library load.
 #[no_mangle]
 pub unsafe extern "C" fn JNI_OnLoad(_vm: *mut JavaVM, _reserved: *mut std::ffi::c_void) -> jint {
-    #[cfg(feature = "jni-bindings")]
+    // android_logger доступен только при сборке для Android (фича android-log).
+    // При сборке desktop/Windows этот блок не компилируется.
+    #[cfg(feature = "android-log")]
     {
         android_logger::init_once(
             android_logger::Config::default()

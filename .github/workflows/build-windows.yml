@@ -1,3 +1,11 @@
+# CI-пайплайн: сборка Windows-инсталлятора ADA Messenger.
+#
+# Использует фичу `desktop` (Cargo) — JNI для Compose Desktop без android_logger,
+# который компилируется только для Android и ломает сборку на Windows.
+#
+# Срабатывает при пуше в main, при теге v* и вручную (workflow_dispatch).
+# Инсталлятор публикуется в артефактах; при теге — прикрепляется к релизу.
+
 name: Build Windows Installer
 
 on:
@@ -10,43 +18,47 @@ on:
 
 jobs:
   build-windows:
-    name: Build Windows Installer
+    name: Сборка Windows-инсталлятора
     runs-on: windows-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Установка JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: temurin
 
-      - name: Install Rust
+      - name: Установка Rust
         uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ada-core
 
-      - name: Install NSIS
+      - name: Установка NSIS
         run: choco install nsis -y
 
-      - name: Build installer (unsigned)
+      # Флаг -SkipSigning: подпись code-signing сертификатом не нужна в CI.
+      # Используется фича `desktop` (без android_logger) — корректно компилируется на Windows.
+      - name: Сборка инсталлятора (без подписи)
         shell: pwsh
         run: ./build-installer-windows.ps1 -SkipSigning
 
-      - name: Upload Windows installer
+      - name: Загрузка инсталлятора как артефакт
         uses: actions/upload-artifact@v4
         with:
           name: ada-messenger-windows-installer
           path: releases/*.exe
           if-no-files-found: error
 
-      - name: Attach installer to release
+      # При теге — прикрепляем инсталлятор к GitHub Release автоматически.
+      - name: Прикрепление инсталлятора к релизу
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: releases/*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

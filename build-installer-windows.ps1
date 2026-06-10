@@ -126,7 +126,7 @@ Write-Host "NSIS : $NsisPath"
 Write-Host ""
 
 # - Step 1: Build ada_core.dll -
-Write-Host "[1/4] Building ada_core.dll (Rust, mobile-dev)..." -ForegroundColor Green
+Write-Host "[1/4] Building ada_core.dll (Rust, desktop)..." -ForegroundColor Green
 if ($SkipCargoBuild -and (Test-Path $dllSrc)) {
     Write-Host "      Skipping — reusing existing DLL" -ForegroundColor DarkGray
     Write-Host "      $dllSrc"
@@ -134,7 +134,7 @@ if ($SkipCargoBuild -and (Test-Path $dllSrc)) {
     & cargo build `
         --manifest-path "$adaCoreDir\Cargo.toml" `
         --no-default-features `
-        --features mobile-dev `
+        --features desktop `
         --message-format short
     if ($LASTEXITCODE -ne 0) { Write-Error "Cargo build failed (exit $LASTEXITCODE)"; exit 1 }
     Write-Host "      OK: $dllSrc" -ForegroundColor Green
