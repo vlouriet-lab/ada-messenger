@@ -33,18 +33,13 @@ formal third-party security audit; use it accordingly.
 
 Стабильные сборки публикуются на странице [Releases](../../releases) при каждом теге версии.
 
-### Последняя сборка из `main` (nightly)
+**Android** — скачайте `.apk` (не `.zip`) со страницы Releases, включите *Установку из неизвестных источников* для браузера или файлового менеджера, откройте файл.
 
-Актуальные артефакты каждого коммита доступны без входа в GitHub:
-
-| Платформа | Ссылка |
-|-----------|--------|
-| Android (подписанный APK) | [ada-messenger-signed.zip](https://nightly.link/vlouriet-lab/ada-messenger/workflows/build-android/main/ada-messenger-signed.zip) |
-| Windows (NSIS installer) | [ada-messenger-windows-installer.zip](https://nightly.link/vlouriet-lab/ada-messenger/workflows/build-windows/main/ada-messenger-windows-installer.zip) |
-
-> Nightly-сборки не проходят дополнительного QA. Для production использования берите релиз.
-
-**Android** — скачайте APK, включите *Установку из неизвестных источников* для браузера или файлового менеджера, откройте файл.
+Доступны два варианта APK:
+| Файл | Описание |
+|------|----------|
+| `ada-messenger-vX.Y.Z.apk` | Универсальный (arm64 + armeabi-v7a + x86_64) |
+| `ada-messenger-vX.Y.Z-arm64.apk` | Только arm64 — рекомендуется для современных устройств (Android 8+), ~40% меньше |
 
 **Windows** — запустите `ADA-Messenger-Setup-*.exe`. SmartScreen может показать предупреждение *Подробнее → Выполнить в любом случае* (сборка без EV code-signing сертификата).
 

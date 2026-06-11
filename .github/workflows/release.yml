@@ -122,20 +122,47 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v3
 
-      - name: Build quasiRelease APK
+      - name: Разрешение на выполнение gradlew
+        run: chmod +x android-app/gradlew
+
+      # === Fat APK (arm64 + armeabi-v7a + x86_64) ===
+      - name: Сборка fat APK (все ABI)
         working-directory: android-app
         run: |
           ./gradlew :app:assembleQuasiRelease \
             -Pada.skipNativeBuild=true \
             --console=plain --no-daemon
 
-      - name: Rename APK
+      - name: Сохранение fat APK
         run: |
           TAG="${{ github.ref_name }}"
           [[ -z "$TAG" ]] && TAG="${{ inputs.tag }}"
           [[ -z "$TAG" ]] && TAG="manual"
           APK_SRC=$(find android-app/app/build/outputs/apk -name "*.apk" | head -1)
           cp "$APK_SRC" "ada-messenger-${TAG}.apk"
+
+      # === Arm64-only APK (только aarch64-linux-android) ===
+      # Убираем armeabi-v7a и x86_64 .so — Gradle включит только arm64-v8a.
+      # Большинство устройств с Android 8+ — arm64. Размер APK ~40% меньше.
+      - name: Удаление non-arm64 библиотек
+        run: |
+          rm -rf android-app/app/src/main/jniLibs/armeabi-v7a \
+                 android-app/app/src/main/jniLibs/x86_64
+
+      - name: Сборка arm64-only APK
+        working-directory: android-app
+        run: |
+          ./gradlew :app:assembleQuasiRelease \
+            -Pada.skipNativeBuild=true \
+            --console=plain --no-daemon
+
+      - name: Сохранение arm64 APK
+        run: |
+          TAG="${{ github.ref_name }}"
+          [[ -z "$TAG" ]] && TAG="${{ inputs.tag }}"
+          [[ -z "$TAG" ]] && TAG="manual"
+          APK_SRC=$(find android-app/app/build/outputs/apk -name "*.apk" | head -1)
+          cp "$APK_SRC" "ada-messenger-${TAG}-arm64.apk"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -226,9 +253,15 @@ jobs:
           body: |
             ## Установка / Install
 
-            **Android** — скачайте `.apk` ниже, включите *Установка из неизвестных источников*
-            для вашего браузера или файлового менеджера, затем откройте файл.
-            Или через ADB: `adb install -r ada-messenger-${{ steps.tag.outputs.tag }}.apk`
+            **Android** — скачайте `.apk` файл ниже (не `.zip`), включите *Установка из неизвестных источников*
+            для браузера или файлового менеджера, откройте файл.
+
+            | APK | Устройства |
+            |-----|-----------|
+            | `ada-messenger-*-arm64.apk` | **Рекомендуется** — современные устройства (Android 8+, arm64) |
+            | `ada-messenger-*.apk` | Универсальный — arm64 + armeabi-v7a + x86_64 (эмулятор) |
+
+            Через ADB: `adb install -r ada-messenger-${{ steps.tag.outputs.tag }}-arm64.apk`
 
             **Windows** — скачайте и запустите `ADA-Messenger-Setup-${{ steps.tag.outputs.tag }}.exe`.
             Windows SmartScreen может показать *Подробнее → Выполнить* (сборка без EV-сертификата).
