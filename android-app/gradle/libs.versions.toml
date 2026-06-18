@@ -25,7 +25,7 @@ mockk = "1.13.10"
 coroutinesTest = "1.8.0"
 turbine = "1.1.0"
 json = "20240303"
-androidxTest = "1.6.1"
+androidxTest = "1.7.0"
 androidxTestExtJunit = "1.2.1"
 googleFonts = "1.7.3"
 
