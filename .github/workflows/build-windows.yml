@@ -37,10 +37,12 @@ jobs:
         with:
           workspaces: ada-core
 
-      - name: Установка CMake 3.29 (fix для audiopus_sys)
-        uses: jwlawson/actions-setup-cmake@v2
-        with:
-          cmake-version: '3.29.x'
+      - name: Создать обертку для CMake (fix audiopus_sys)
+        shell: pwsh
+        run: |
+          $wrapper = "$env:RUNNER_TEMP\cmake-wrapper.bat"
+          Set-Content -Path $wrapper -Value '@cmake.exe -DCMAKE_POLICY_VERSION_MINIMUM=3.5 %*'
+          echo "CMAKE=$wrapper" >> $env:GITHUB_ENV
 
       - name: Установка NSIS
         run: choco install nsis -y
