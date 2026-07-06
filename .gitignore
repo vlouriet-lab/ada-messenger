@@ -1,5 +1,6 @@
 # Build outputs
 ada-core/target/
+ada-core/target-android/
 android-app/app/build/
 android-app/build/
 android-app/.gradle/
@@ -37,6 +38,13 @@ production/
 # Gradle
 android-app/local.properties
 
+# ── Signing secrets (NEVER commit keystores or credentials) ──────────────────
+# Release keystore — store outside the repo and reference via local.properties.
+# To generate: keytool -genkey -v -keystore /path/outside/repo/ada-release.jks ...
+*.jks
+*.keystore
+signing.properties
+
 # Scratch scripts and local assets
 *.png
 *.py
@@ -44,12 +52,10 @@ android-app/local.properties
 *.txt
 *.b64
 *.jar
+
+# Quasi-release output directories
 android-app/quasi-releases/
 android-app/app/src/quasiRelease/
 
-ada-core/target-android/
-android-app/app/src/quasiRelease/
+# UI XML snapshots
 android-app/ui*.xml
-android-app/*.txt
-*.b64
-*.jar

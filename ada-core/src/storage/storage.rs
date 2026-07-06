@@ -34,6 +34,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+#[cfg(feature = "sqlcipher")]
+use zeroize::Zeroizing;
 
 // ── Tokio runtime guard ───────────────────────────────────────────────────────
 
@@ -114,6 +116,37 @@ const MIGRATION_V3: &str = "
     CREATE INDEX IF NOT EXISTS idx_call_log_ended ON call_log(ended_at DESC);
 ";
 
+/// КРИТ-6: Applies all pending schema migrations to `conn`.
+///
+/// Previously this block was duplicated verbatim in both `open()` and
+/// `open_encrypted()`, making it easy to miss a migration when adding V4+.
+/// Now there is a single authoritative implementation.
+fn apply_migrations(conn: &Connection) -> Result<()> {
+    let current_version: u32 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap_or(0);
+
+    if current_version < 1 {
+        conn.execute_batch(MIGRATION_V1)
+            .map_err(|e| ADAError::Storage(format!("migration v1: {}", e)))?;
+        conn.execute_batch("PRAGMA user_version = 1")
+            .map_err(|e| ADAError::Storage(format!("set version 1: {}", e)))?;
+    }
+    if current_version < 2 {
+        conn.execute_batch(MIGRATION_V2)
+            .map_err(|e| ADAError::Storage(format!("migration v2: {}", e)))?;
+        conn.execute_batch("PRAGMA user_version = 2")
+            .map_err(|e| ADAError::Storage(format!("set version 2: {}", e)))?;
+    }
+    if current_version < 3 {
+        conn.execute_batch(MIGRATION_V3)
+            .map_err(|e| ADAError::Storage(format!("migration v3: {}", e)))?;
+        conn.execute_batch("PRAGMA user_version = 3")
+            .map_err(|e| ADAError::Storage(format!("set version 3: {}", e)))?;
+    }
+    Ok(())
+}
+
 /// Thread-safe persistent key-value store backed by SQLite.
 pub struct KeyValueStore {
     writer: Mutex<Connection>,
@@ -169,29 +202,8 @@ impl KeyValueStore {
         let open_conn = |p: &str| -> Result<Connection> {
             let conn = Connection::open(p)
                 .map_err(|e| ADAError::Storage(format!("sqlite open: {}", e)))?;
-
-            let current_version: u32 = conn
-                .query_row("PRAGMA user_version", [], |r| r.get(0))
-                .unwrap_or(0);
-
-            if current_version < 1 {
-                conn.execute_batch(MIGRATION_V1)
-                    .map_err(|e| ADAError::Storage(format!("migration v1: {}", e)))?;
-                conn.execute_batch("PRAGMA user_version = 1")
-                    .map_err(|e| ADAError::Storage(format!("set version 1: {}", e)))?;
-            }
-            if current_version < 2 {
-                conn.execute_batch(MIGRATION_V2)
-                    .map_err(|e| ADAError::Storage(format!("migration v2: {}", e)))?;
-                conn.execute_batch("PRAGMA user_version = 2")
-                    .map_err(|e| ADAError::Storage(format!("set version 2: {}", e)))?;
-            }
-            if current_version < 3 {
-                conn.execute_batch(MIGRATION_V3)
-                    .map_err(|e| ADAError::Storage(format!("migration v3: {}", e)))?;
-                conn.execute_batch("PRAGMA user_version = 3")
-                    .map_err(|e| ADAError::Storage(format!("set version 3: {}", e)))?;
-            }
+            // КРИТ-6: single call to the shared migration helper
+            apply_migrations(&conn)?;
             Ok(conn)
         };
         Ok(KeyValueStore {
@@ -240,33 +252,16 @@ impl KeyValueStore {
             // unencrypted dev builds still work with plain SQLite.
             #[cfg(feature = "sqlcipher")]
             {
-                let key_hex = hex::encode(&_db_key);
-                conn.execute_batch(&format!("PRAGMA key = \"x'{}'\";\n", key_hex))
+                // СРЕД-8: wrap key_hex in Zeroizing so the raw secret is wiped
+                // from the stack as soon as the PRAGMA has been executed.
+                let key_hex: Zeroizing<String> = Zeroizing::new(hex::encode(&_db_key));
+                conn.execute_batch(&format!("PRAGMA key = \"x'{}'\";\n", key_hex.as_str()))
                     .map_err(|e| ADAError::Storage(format!("sqlcipher PRAGMA key: {}", e)))?;
+                // key_hex is dropped (and zeroized) here.
             }
 
-            let current_version: u32 = conn
-                .query_row("PRAGMA user_version", [], |r| r.get(0))
-                .unwrap_or(0);
-
-            if current_version < 1 {
-                conn.execute_batch(MIGRATION_V1)
-                    .map_err(|e| ADAError::Storage(format!("migration v1: {}", e)))?;
-                conn.execute_batch("PRAGMA user_version = 1")
-                    .map_err(|e| ADAError::Storage(format!("set version 1: {}", e)))?;
-            }
-            if current_version < 2 {
-                conn.execute_batch(MIGRATION_V2)
-                    .map_err(|e| ADAError::Storage(format!("migration v2: {}", e)))?;
-                conn.execute_batch("PRAGMA user_version = 2")
-                    .map_err(|e| ADAError::Storage(format!("set version 2: {}", e)))?;
-            }
-            if current_version < 3 {
-                conn.execute_batch(MIGRATION_V3)
-                    .map_err(|e| ADAError::Storage(format!("migration v3: {}", e)))?;
-                conn.execute_batch("PRAGMA user_version = 3")
-                    .map_err(|e| ADAError::Storage(format!("set version 3: {}", e)))?;
-            }
+            // КРИТ-6: single call to the shared migration helper
+            apply_migrations(&conn)?;
             Ok(conn)
         };
         Ok(KeyValueStore {
@@ -313,8 +308,17 @@ impl KeyValueStore {
     pub fn delete(&self, key: &str) {
         if self.persistent {
             blocking_op(|| {
-                if let Ok(conn) = self.writer.lock() {
-                    let _ = conn.execute("DELETE FROM kv_store WHERE key = ?1", [key]);
+                // СРЕД-7: propagate / log errors instead of silently discarding them.
+                // A failed DELETE on a ratchet key or OPK could lead to key reuse.
+                match self.writer.lock() {
+                    Ok(conn) => {
+                        if let Err(e) = conn.execute("DELETE FROM kv_store WHERE key = ?1", [key]) {
+                            tracing::error!("[storage] DELETE failed for key '{}': {}", key, e);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("[storage] writer lock poisoned on DELETE for key '{}': {}", key, e);
+                    }
                 }
             })
         } else {

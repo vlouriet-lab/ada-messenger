@@ -138,13 +138,20 @@ pub fn x3dh_send(
 /// - `bob_opk_secret`  Bob's one-time pre-key secret (if used)
 /// - `alice_ik_public` Alice's long-term identity DH public key
 /// - `alice_ek_public` Alice's ephemeral public key (from initial message)
+///
+/// # Returns
+/// `Ok([u8; 32])` — shared secret; or `Err` if inputs are invalid.
+///
+/// Returning `Result` (СРЕД-3 fix) allows callers to propagate errors and
+/// lets us add Curve25519 low-order point rejection and IK-signature
+/// verification inside this function in future without changing the API.
 pub fn x3dh_receive(
     bob_ik_secret: &StaticSecret,
     bob_spk_secret: &StaticSecret,
     bob_opk_secret: Option<&StaticSecret>,
     alice_ik_public: [u8; 32],
     alice_ek_public: [u8; 32],
-) -> [u8; 32] {
+) -> crate::error::Result<[u8; 32]> {
     let alice_ik = PublicKey::from(alice_ik_public);
     let alice_ek = PublicKey::from(alice_ek_public);
 
@@ -161,12 +168,12 @@ pub fn x3dh_receive(
         *dh4.as_bytes()
     });
 
-    kdf_x3dh(
+    Ok(kdf_x3dh(
         dh1.as_bytes(),
         dh2.as_bytes(),
         dh3.as_bytes(),
         dh4_bytes.as_ref().map(|b| b.as_slice()),
-    )
+    ))
 }
 
 // ── KDF ──────────────────────────────────────────────────────────────────────
@@ -251,7 +258,7 @@ mod tests {
             None,
             alice_ik_pub,
             result.ephemeral_public,
-        );
+        ).unwrap();
 
         assert_eq!(
             result.shared_secret, bob_ss,
@@ -288,7 +295,7 @@ mod tests {
             Some(&bob_opk),
             alice_ik_pub,
             result.ephemeral_public,
-        );
+        ).unwrap();
 
         assert_eq!(result.shared_secret, bob_ss);
     }

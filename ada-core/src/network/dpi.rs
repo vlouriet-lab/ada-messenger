@@ -67,13 +67,30 @@ impl ObfuscationMode {
 }
 
 /// Apply padding obfuscation to a packet payload.
+///
 /// Returns the padded payload. The receiver must strip padding before processing.
+///
+/// Wire format:
+///   bytes [0..4]        — BE u32: actual plaintext length (supports up to 4 GiB)
+///   bytes [4..4+len]    — actual payload
+///   bytes [4+len..end]  — random padding (0..=max_padding bytes)
+///
+/// # Panics
+/// Panics if `payload.len()` exceeds `u32::MAX` (~4 GiB), which is far above any
+/// realistic message size.  The `MAX_MSG_BYTES` cap (4 MiB) applied upstream
+/// makes this unreachable in practice; the assertion documents the invariant.
 pub fn apply_padding(payload: &[u8], max_padding: usize) -> Vec<u8> {
     use rand::{Rng, RngCore};
+    // Guard: u16 previously silently truncated payloads > 65535 bytes (КРИТ-11 fix).
+    assert!(
+        payload.len() <= u32::MAX as usize,
+        "apply_padding: payload length {} exceeds u32::MAX",
+        payload.len()
+    );
     let extra = rand::thread_rng().gen_range(0..=max_padding);
-    let mut out = Vec::with_capacity(payload.len() + 2 + extra);
-    // 2-byte big-endian original length prefix
-    let orig_len = payload.len() as u16;
+    let mut out = Vec::with_capacity(payload.len() + 4 + extra);
+    // 4-byte big-endian original length prefix (was 2-byte / u16 — КРИТ-11 fix)
+    let orig_len = payload.len() as u32;
     out.extend_from_slice(&orig_len.to_be_bytes());
     out.extend_from_slice(payload);
     // random padding — fill_bytes is a single CSPRNG call, not N separate calls
@@ -86,15 +103,18 @@ pub fn apply_padding(payload: &[u8], max_padding: usize) -> Vec<u8> {
 }
 
 /// Strip padding added by `apply_padding`, returning the original payload.
+///
+/// Returns `None` if the buffer is too short or the declared length is inconsistent.
 pub fn strip_padding(padded: &[u8]) -> Option<Vec<u8>> {
-    if padded.len() < 2 {
+    // Need at least 4 bytes for the u32 length prefix (was 2 — КРИТ-11 fix)
+    if padded.len() < 4 {
         return None;
     }
-    let orig_len = u16::from_be_bytes([padded[0], padded[1]]) as usize;
-    if 2 + orig_len > padded.len() {
+    let orig_len = u32::from_be_bytes([padded[0], padded[1], padded[2], padded[3]]) as usize;
+    if 4 + orig_len > padded.len() {
         return None;
     }
-    Some(padded[2..2 + orig_len].to_vec())
+    Some(padded[4..4 + orig_len].to_vec())
 }
 
 #[cfg(test)]

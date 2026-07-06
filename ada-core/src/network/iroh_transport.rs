@@ -91,6 +91,15 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(15);
 /// Timeout for `read_to_end` on the receiver side.
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Maximum number of live QUIC connections kept in `conn_cache`.
+///
+/// When the cache exceeds this limit on a new connection insert, stale
+/// (closed) entries are evicted first.  If no stale entries exist, the
+/// oldest live connection is closed and removed to make room.  This bounds
+/// memory usage for long-running nodes that communicate with many unique peers.
+/// 128 is generous for a mobile app; raise for relay/bridge nodes if needed.
+const MAX_CONN_CACHE_SIZE: usize = 128;
+
 /// A message received on the iroh endpoint.
 pub struct IrohMessage {
     /// Ed25519 public key of the sender (= their ADA `PeerId` bytes).
@@ -251,6 +260,20 @@ impl IrohTransport {
                                         }
                                         match blob_store2.read().await.get(&hash_buf).cloned() {
                                             Some(BlobData::Memory(data)) => {
+                                                // КРИТ-10: verify content-hash before serving.
+                                                // A mismatch means the store is corrupt or the
+                                                // request was tampered with — refuse to serve.
+                                                let actual_hash = *blake3::hash(&data).as_bytes();
+                                                if actual_hash != hash_buf {
+                                                    tracing::error!(
+                                                        "iroh blob hash mismatch: requested={} actual={} — refusing to serve",
+                                                        hex::encode(hash_buf),
+                                                        hex::encode(actual_hash),
+                                                    );
+                                                    let _ = send.write_all(&0u64.to_le_bytes()).await;
+                                                    let _ = send.finish();
+                                                    return;
+                                                }
                                                 let _ = send.write_all(&(data.len() as u64).to_le_bytes()).await;
                                                 let _ = send.write_all(&data).await;
                                                 let _ = send.finish();
@@ -260,17 +283,27 @@ impl IrohTransport {
                                                 );
                                             }
                                             Some(BlobData::File(path)) => {
-                                                if let Ok(mut file) = tokio::fs::File::open(&path).await {
-                                                    if let Ok(metadata) = file.metadata().await {
-                                                        let len = metadata.len();
-                                                        let _ = send.write_all(&len.to_le_bytes()).await;
-                                                        let _ = tokio::io::copy(&mut file, &mut send).await;
-                                                        let _ = send.finish();
-                                                        tracing::debug!(
-                                                            "iroh blob served file {} B hash={}",
-                                                            len, hex::encode(hash_buf)
+                                                if let Ok(data) = tokio::fs::read(&path).await {
+                                                    // КРИТ-10: verify file content hash before serving.
+                                                    let actual_hash = *blake3::hash(&data).as_bytes();
+                                                    if actual_hash != hash_buf {
+                                                        tracing::error!(
+                                                            "iroh blob file hash mismatch: requested={} actual={} path={:?}",
+                                                            hex::encode(hash_buf),
+                                                            hex::encode(actual_hash),
+                                                            path,
                                                         );
+                                                        let _ = send.write_all(&0u64.to_le_bytes()).await;
+                                                        let _ = send.finish();
+                                                        return;
                                                     }
+                                                    let _ = send.write_all(&(data.len() as u64).to_le_bytes()).await;
+                                                    let _ = send.write_all(&data).await;
+                                                    let _ = send.finish();
+                                                    tracing::debug!(
+                                                        "iroh blob served file {} B hash={}",
+                                                        data.len(), hex::encode(hash_buf)
+                                                    );
                                                 } else {
                                                     let _ = send.write_all(&0u64.to_le_bytes()).await;
                                                     let _ = send.finish();
@@ -837,7 +870,35 @@ impl IrohTransport {
         .map_err(|_| ADAError::Network("iroh connect timeout".into()))?
         .map_err(|e| ADAError::Network(format!("iroh connect: {}", e)))?;
 
-        self.conn_cache.write().await.insert(*peer_id, conn.clone());
+        // СРЕД-12: enforce cache size limit before inserting the new connection.
+        // Without this, a long-running node accumulates dead Connection objects
+        // for every unique peer it has ever spoken to.
+        let mut cache = self.conn_cache.write().await;
+        if cache.len() >= MAX_CONN_CACHE_SIZE {
+            // First try to evict already-closed connections (free, no disruption).
+            let stale: Vec<_> = cache
+                .iter()
+                .filter(|(_, c)| !Self::connection_is_alive(c))
+                .map(|(k, _)| *k)
+                .collect();
+            for k in &stale {
+                cache.remove(k);
+            }
+            // If still over limit, close and evict the first live entry.
+            if cache.len() >= MAX_CONN_CACHE_SIZE {
+                if let Some(oldest_key) = cache.keys().next().copied() {
+                    if let Some(old_conn) = cache.remove(&oldest_key) {
+                        old_conn.close(0u32.into(), b"cache-evict");
+                        tracing::debug!(
+                            "iroh conn_cache evicted {} (limit={})",
+                            hex::encode(oldest_key),
+                            MAX_CONN_CACHE_SIZE
+                        );
+                    }
+                }
+            }
+        }
+        cache.insert(*peer_id, conn.clone());
         Ok(conn)
     }
 

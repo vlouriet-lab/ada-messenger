@@ -113,6 +113,33 @@ impl Drop for RatchetState {
     }
 }
 
+/// Manual `Clone` implementation for RatchetState.
+///
+/// We cannot use `#[derive(Clone)]` here because a derived `Clone` on a type
+/// with a non-trivial `Drop` can mislead static analysers into thinking the
+/// clone shares memory with the original.  This explicit impl makes the deep
+/// copy semantics unambiguous.  The clone gets its own `Drop`, so key bytes
+/// are zeroized independently when the clone is dropped.
+///
+/// Used by `SessionManager::export_sessions()` (СРЕД-21 fix).
+impl Clone for RatchetState {
+    fn clone(&self) -> Self {
+        RatchetState {
+            dh_self_secret:      self.dh_self_secret,
+            dh_self_public:      self.dh_self_public,
+            dh_remote_public:    self.dh_remote_public,
+            root_key:            self.root_key,
+            sending_chain_key:   self.sending_chain_key,
+            send_count:          self.send_count,
+            receiving_chain_key: self.receiving_chain_key,
+            recv_count:          self.recv_count,
+            prev_send_count:     self.prev_send_count,
+            skipped_keys:        self.skipped_keys.clone(),
+            initialised:         self.initialised,
+        }
+    }
+}
+
 impl RatchetState {
     /// Initialise ratchet as the session *initiator* (Alice).
     ///
@@ -314,11 +341,17 @@ fn kdf_rk(root_key: &[u8; 32], dh_output: &[u8]) -> ([u8; 32], [u8; 32]) {
 }
 
 /// Chain KDF: given chain key, produce (new_chain_key, message_key).
+///
+/// Per Signal Double Ratchet §2.2, the chain key is used as the HKDF **IKM**
+/// (input key material), not as the salt.  Previously chain_key was passed as
+/// salt with ikm=[], which is not wrong cryptographically but diverges from the
+/// spec and confuses external reviewers.  Fixed: chain_key → IKM, salt=&[] (КРИТ-2).
 fn kdf_ck(chain_key: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
     let mut new_ck = [0u8; 32];
     let mut mk = [0u8; 32];
-    hkdf_derive(chain_key, None, CHAIN_KDF_INFO, &mut new_ck);
-    hkdf_derive(chain_key, None, MSG_KDF_INFO, &mut mk);
+    // Pass chain_key as IKM (not salt) to match the Signal spec.
+    hkdf_derive(&[], Some(chain_key.as_slice()), CHAIN_KDF_INFO, &mut new_ck);
+    hkdf_derive(&[], Some(chain_key.as_slice()), MSG_KDF_INFO, &mut mk);
     (new_ck, mk)
 }
 

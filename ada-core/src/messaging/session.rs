@@ -335,7 +335,7 @@ impl SessionManager {
             let bob_spk = StaticSecret::from(*self.identity.spk_secret_bytes());
 
             let shared_secret =
-                x3dh_receive(&bob_ik, &bob_spk, opk_secret.as_ref(), ik_pub, ek_pub);
+                x3dh_receive(&bob_ik, &bob_spk, opk_secret.as_ref(), ik_pub, ek_pub)?;
 
             let ratchet =
                 RatchetState::init_receiver(shared_secret, *self.identity.spk_secret_bytes());
@@ -418,11 +418,27 @@ impl SessionManager {
         );
     }
 
-    /// Export all ratchet states for persistence.
+    /// Export all in-memory ratchet states so they can be persisted by the caller.
+    ///
+    /// Previously this was a stub returning `vec![]` (СРЕД-21 fix).  Now it
+    /// iterates the session map and returns a snapshot of every live session.
+    ///
+    /// Note: ratchet persistence is also handled automatically by the storage
+    /// layer on each message send/receive.  This method provides an explicit
+    /// bulk-export path for backup / migration use-cases.
     pub fn export_sessions(&self) -> Vec<(PeerId, RatchetState)> {
-        // We need to consume the sessions; instead, we re-serialise from stored state.
-        // For now return an empty list — full persistence is handled via storage layer.
-        vec![]
+        self.sessions
+            .read()
+            .iter()
+            .filter_map(|(peer_b64, session)| {
+                // Only export sessions that have completed the X3DH handshake.
+                if !session.handshake_complete {
+                    return None;
+                }
+                let peer_id = PeerId::from_base64(peer_b64).ok()?;
+                Some((peer_id, session.ratchet.clone()))
+            })
+            .collect()
     }
 
     /// Whether a live session exists for the given peer.

@@ -117,7 +117,7 @@ mod tests {
             bob_opk.as_ref(),
             alice_ik_pub,
             result.ephemeral_public,
-        );
+        ).unwrap();
 
         assert_eq!(result.shared_secret, bob_shared);
     }
@@ -148,7 +148,7 @@ mod tests {
             bob_opk.as_ref(),
             alice_ik_pub,
             x3dh_res.ephemeral_public,
-        );
+        ).unwrap();
 
         let mut alice_r = RatchetState::init_sender(x3dh_res.shared_secret, bundle.spk_public);
         let mut bob_r = RatchetState::init_receiver(bob_shared, *bob.spk_secret_bytes());
@@ -186,7 +186,7 @@ mod tests {
             bob_opk.as_ref(),
             aik_pub,
             x3dh.ephemeral_public,
-        );
+        ).unwrap();
 
         let mut ar = RatchetState::init_sender(x3dh.shared_secret, bundle.spk_public);
         let mut br = RatchetState::init_receiver(bs, *bob.spk_secret_bytes());
