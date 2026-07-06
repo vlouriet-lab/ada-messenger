@@ -1,64 +1,55 @@
-# ───────────────────────── ADA Messenger .gitignore ─────────────────────────
-
-# ============ SECRETS — never commit ============
-# Android signing keystore & local signing credentials
-*.jks
-*.keystore
-*.p12
-*.pfx
-android-app/local.properties
-local.properties
-# Generic secret / key material
-*.pem
-*.key
-.env
-.env.*
-secrets.*
-**/serviceAccount*.json
-google-services.json
-
-# ============ Rust / Cargo ============
+# Build outputs
 ada-core/target/
-ada-core/target-android/
-**/target/
-**/*.rs.bk
-*.pdb
+android-app/app/build/
+android-app/build/
+android-app/.gradle/
 
-# ============ Android / Gradle ============
-.gradle/
-**/build/
-**/.cxx/
-**/jniLibs/
-captures/
-.externalNativeBuild/
-
-# ============ Compose Desktop / Windows build output ============
-android-app/desktopApp/build/
-releases/
-*.exe
-*.msi
-!installer.nsi
-
-# ============ Node (Cloudflare Workers) ============
-node_modules/
-.wrangler/
-npm-debug.log*
-
-# ============ IDE / Editor ============
+# IDE
 .idea/
-.vscode/
 *.iml
+.vscode/
 
-# ============ Logs, dumps, scratch ============
+# Logs & debug artifacts
 *.log
-*.txt
-!**/proguard-rules.pro
-uidump*.xml
-ui_*.xml
-*.db
-*.db-journal
-*.b64
+*_log.txt
+*_build_log.txt
+cargo_msgs.json
+contact_log.txt
+crash_log.txt
+gradle_build_log.txt
+gradle2.txt
+rust_build_log.txt
+rust_build2.txt
 
-# ============ OS ============
-.DS_Store
+# JNI compiled libraries (built from Rust, not checked in)
+android-app/app/src/main/jniLibs/
+
+# OS
 Thumbs.db
+.DS_Store
+
+# Backup snapshots
+_backup_*/
+
+# Production operator artifacts generated locally; may contain deployment data.
+production/
+
+# Gradle
+android-app/local.properties
+
+# Scratch scripts and local assets
+*.png
+*.py
+*.ps1
+*.txt
+*.b64
+*.jar
+android-app/quasi-releases/
+android-app/app/src/quasiRelease/
+
+ada-core/target-android/
+android-app/app/src/quasiRelease/
+android-app/ui*.xml
+android-app/*.txt
+*.b64
+*.jar
