@@ -51,7 +51,7 @@ jobs:
 
       # android-actions/setup-android устанавливает Android SDK + NDK корректно.
       # Заменяет несуществующий ndk-build/ndk-build action.
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
 
       - name: Установка cargo-ndk
         run: cargo install cargo-ndk --locked
