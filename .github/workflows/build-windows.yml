@@ -20,6 +20,8 @@ jobs:
   build-windows:
     name: Сборка Windows-инсталлятора
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v5
