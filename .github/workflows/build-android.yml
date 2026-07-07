@@ -119,7 +119,7 @@ jobs:
           sed -i "s|\$STORE_PASS|${{ secrets.ANDROID_KEYSTORE_PASSWORD }}|g" android-app/local.properties
           sed -i "s|\$KEY_PASS|${{ secrets.ANDROID_KEY_PASSWORD }}|g" android-app/local.properties
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
 
       - name: Разрешение на выполнение gradlew
         run: chmod +x android-app/gradlew
@@ -229,7 +229,7 @@ jobs:
           java-version: 17
           distribution: temurin
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
 
       - name: Разрешение на выполнение gradlew
         run: chmod +x android-app/gradlew
