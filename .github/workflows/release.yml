@@ -120,7 +120,7 @@ jobs:
           STORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_PASS:   ${{ secrets.ANDROID_KEY_PASSWORD }}
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
 
       - name: Разрешение на выполнение gradlew
         run: chmod +x android-app/gradlew
