@@ -87,7 +87,7 @@ jobs:
           distribution: temurin
 
       - name: Загрузка Rust-артефактов
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
@@ -254,7 +254,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Скачивание артефактов
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
 
       - name: GitHub Release (черновик)
         uses: softprops/action-gh-release@v2
