@@ -1,0 +1,14 @@
+name: Test Vcpkg
+on:
+  push:
+    branches:
+      - test-vcpkg
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - name: Install Opus
+        run: |
+          vcpkg install opus:x64-windows-static
+          Get-ChildItem -Path C:\vcpkg\installed\x64-windows-static\lib -ErrorAction SilentlyContinue
+          Get-ChildItem -Path C:\vcpkg\packages\opus_x64-windows-static\lib -ErrorAction SilentlyContinue
