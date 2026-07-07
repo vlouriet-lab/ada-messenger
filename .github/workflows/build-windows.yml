@@ -42,10 +42,18 @@ jobs:
       - name: Установка NSIS
         run: choco install nsis -y
 
-      # Флаг -SkipSigning: подпись code-signing сертификатом не нужна в CI.
-      # Используется фича `desktop` (без android_logger) — корректно компилируется на Windows.
-      # audiopus_sys/CMakeLists.txt автоматически патчится в ada-core/build.rs
-      # (добавляет cmake_minimum_required 3.5 для совместимости с CMake 4.x / VS 2026).
+      # audiopus_sys пытается собрать Opus через CMake, но CMake 4.x (VS 2026)
+      # несовместим со старым cmake_minimum_required(VERSION 2.8) в исходниках Opus.
+      # Решение: собираем Opus через vcpkg заранее и указываем путь через LIBOPUS_LIB_DIR.
+      # audiopus_sys при наличии LIBOPUS_LIB_DIR полностью пропускает CMake.
+      - name: Установка Opus через vcpkg (fix CMake 4.x)
+        shell: pwsh
+        run: |
+          vcpkg install opus:x64-windows-static
+          $opusLib = "C:\vcpkg\packages\opus_x64-windows-static\lib"
+          echo "LIBOPUS_LIB_DIR=$opusLib" >> $env:GITHUB_ENV
+          echo "OPUS_STATIC=1" >> $env:GITHUB_ENV
+
       - name: Сборка инсталлятора (без подписи)
         shell: pwsh
         run: ./build-installer-windows.ps1 -SkipSigning
