@@ -50,7 +50,7 @@ jobs:
         shell: pwsh
         run: |
           vcpkg install opus:x64-windows-static
-          $opusLib = "C:\vcpkg\packages\opus_x64-windows-static\lib"
+          $opusLib = "C:\vcpkg\installed\x64-windows-static\lib"
           echo "LIBOPUS_LIB_DIR=$opusLib" >> $env:GITHUB_ENV
           echo "OPUS_STATIC=1" >> $env:GITHUB_ENV
 
