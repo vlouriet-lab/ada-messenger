@@ -68,7 +68,7 @@ jobs:
       # При теге — прикрепляем инсталлятор к GitHub Release автоматически.
       - name: Прикрепление инсталлятора к релизу
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: releases/*.exe
         env:
