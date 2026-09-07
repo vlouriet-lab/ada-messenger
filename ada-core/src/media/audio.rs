@@ -445,7 +445,7 @@ mod tests {
     fn opus_encoder_buffers_samples_until_full_frame() {
         let mut enc = OpusEncoder::new(AudioConfig::default()).unwrap();
         // Feed less than one frame — should produce no output
-        let frames = enc.encode(&vec![0i16; 100]).unwrap();
+        let frames = enc.encode(&[0i16; 100]).unwrap();
         assert!(frames.is_empty());
         // Feed enough for several frames
         let samples_per_frame = AudioConfig::default().samples_per_frame() * 2; // stereo

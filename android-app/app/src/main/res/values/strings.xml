@@ -341,7 +341,7 @@
     <string name="bridge_profile_incident_safe_desc">Most conservative mode for raids, outages, or hostile temporary conditions.</string>
     <string name="bridge_relay_only_title">Relay-only routing</string>
     <string name="bridge_relay_only_desc">When enabled, ADA stops using live iroh for direct messages and allows only bridge, mailbox, or local queue routes.</string>
-    <string name="bridge_relay_only_profile_forced">Forced by connection profile. Switch to Auto or Normal to change manually.</string>
+    <string name="bridge_relay_only_profile_forced" translatable="false">Forced by connection profile. Switch to Auto or Normal to change manually.</string>
     <string name="bridge_runtime_title">Runtime status</string>
     <string name="bridge_runtime_profile_label">Profile: %1$s</string>
     <string name="bridge_runtime_stack_label">Transport stack: %1$s</string>
