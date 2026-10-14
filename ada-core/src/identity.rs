@@ -1,4 +1,5 @@
-use crate::crypto::x3dh::sign_spk;
+use crate::crypto::pq::{MlKem768, MlKem768PublicKey, MlKem768SecretKey};
+use crate::crypto::x3dh::{sign_pq_spk, sign_spk, PreKeyBundle};
 use crate::error::{ADAError, Result};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use parking_lot::RwLock;
@@ -28,6 +29,18 @@ fn derive_spk_for_epoch(seed: &[u8; 32], epoch: u32) -> x25519_dalek::StaticSecr
     x25519_dalek::StaticSecret::from(spk_bytes)
 }
 
+/// Derive a deterministic ML-KEM-768 key pair for a given rotation epoch from the Ed25519
+/// signing key seed via HKDF-SHA256.
+fn derive_pq_spk_for_epoch(seed: &[u8; 32], epoch: u32) -> (MlKem768PublicKey, MlKem768SecretKey) {
+    use hkdf::Hkdf;
+    use sha2::Sha256;
+    let hk = Hkdf::<Sha256>::new(None, seed);
+    let info = format!("ada/pq-spk-derive/epoch/{}", epoch);
+    let mut pq_seed = [0u8; 32];
+    let _ = hk.expand(info.as_bytes(), &mut pq_seed);
+    MlKem768::keygen_from_seed(&pq_seed).expect("ML-KEM-768 deterministic keygen")
+}
+
 /// The current signed pre-key state. Wrapped in `RwLock` inside `Identity`
 /// so the SPK can be rotated without requiring `mut` on the `Arc<Identity>`.
 pub struct SpkBundle {
@@ -40,14 +53,18 @@ pub struct SpkBundle {
     pub public: [u8; 32],
     /// Ed25519 signature of `public` by the identity signing key.
     pub signature: Vec<u8>,
+    /// Current ML-KEM-768 secret key (zeroized on drop).
+    pub pq_secret: MlKem768SecretKey,
+    /// Current ML-KEM-768 public key.
+    pub pq_public: MlKem768PublicKey,
+    /// Ed25519 signature of `pq_public` by the identity signing key.
+    pub pq_signature: Vec<u8>,
 }
 
 impl Drop for SpkBundle {
     fn drop(&mut self) {
-        // StaticSecret in x25519-dalek 2.x implements ZeroizeOnDrop when the
-        // `zeroize` feature is enabled, so the DH secret bytes are zeroed
-        // automatically.  No manual action needed here; this impl exists only
-        // as a documentation anchor for reviewers.
+        // StaticSecret in x25519-dalek 2.x and MlKem768SecretKey both implement
+        // ZeroizeOnDrop internally, so key bytes are zeroed automatically.
     }
 }
 
@@ -115,6 +132,8 @@ impl Identity {
         let spk_secret = derive_spk_for_epoch(&seed, 0);
         let spk_public = x25519_dalek::PublicKey::from(&spk_secret).to_bytes();
         let spk_signature = sign_spk(&signing_key, &spk_public);
+        let (pq_public, pq_secret) = derive_pq_spk_for_epoch(&seed, 0);
+        let pq_signature = sign_pq_spk(&signing_key, &pq_public.0);
         let peer_id = PeerId(*signing_key.verifying_key().as_bytes());
         Identity {
             peer_id,
@@ -126,6 +145,9 @@ impl Identity {
                 secret: spk_secret,
                 public: spk_public,
                 signature: spk_signature,
+                pq_secret,
+                pq_public,
+                pq_signature,
             }),
         }
     }
@@ -153,11 +175,29 @@ impl Identity {
         self.spk.read().epoch
     }
 
-    /// Rotate the signed pre-key to a new epoch.
+    /// Current ML-KEM-768 public key.
+    #[inline]
+    pub fn pq_spk_public(&self) -> MlKem768PublicKey {
+        self.spk.read().pq_public.clone()
+    }
+
+    /// Current ML-KEM-768 secret key.
+    #[inline]
+    pub fn pq_spk_secret(&self) -> MlKem768SecretKey {
+        self.spk.read().pq_secret.clone()
+    }
+
+    /// Current ML-KEM-768 Ed25519 signature.
+    #[inline]
+    pub fn pq_spk_signature(&self) -> Vec<u8> {
+        self.spk.read().pq_signature.clone()
+    }
+
+    /// Rotate the signed pre-key (both classical X25519 and ML-KEM-768) to a new epoch.
     ///
     /// Call this approximately every 7–30 days. After rotation, call
     /// `ADACore::republish_bundle()` to update the DHT with the new SPK.
-    /// The old SPK is zeroized when the `SpkBundle` is replaced.
+    /// The old SPKs are zeroized when the `SpkBundle` is replaced.
     pub fn rotate_spk(&self) {
         let seed = self.signing_key.to_bytes();
         let mut w = self.spk.write();
@@ -165,13 +205,18 @@ impl Identity {
         let new_secret = derive_spk_for_epoch(&seed, new_epoch);
         let new_public = x25519_dalek::PublicKey::from(&new_secret).to_bytes();
         let new_sig = sign_spk(&self.signing_key, &new_public);
+        let (new_pq_pub, new_pq_sec) = derive_pq_spk_for_epoch(&seed, new_epoch);
+        let new_pq_sig = sign_pq_spk(&self.signing_key, &new_pq_pub.0);
         *w = SpkBundle {
             epoch: new_epoch,
             secret: new_secret,
             public: new_public,
             signature: new_sig,
+            pq_secret: new_pq_sec,
+            pq_public: new_pq_pub,
+            pq_signature: new_pq_sig,
         };
-        tracing::info!("[identity] SPK rotated to epoch {}", new_epoch);
+        tracing::info!("[identity] SPK and PQ-SPK rotated to epoch {}", new_epoch);
     }
 
     pub fn sign(&self, message: &[u8]) -> Vec<u8> {
@@ -180,15 +225,25 @@ impl Identity {
 
     pub fn public_bundle(&self) -> PublicBundle {
         let spk = self.spk.read();
+        let dh_public = x25519_dalek::PublicKey::from(&self.dh_key).to_bytes();
         PublicBundle {
             peer_id: self.peer_id.clone(),
-            dh_public: x25519_dalek::PublicKey::from(&self.dh_key).to_bytes(),
+            dh_public,
             display_name: self.display_name.clone(),
             spk_public: spk.public,
             spk_signature: spk.signature.clone(),
+            // Bind the X3DH identity key to this Ed25519 identity.  Without it a
+            // rewritten bundle could swap `dh_public` while keeping a valid
+            // `spk_signature` and impersonate us to the recipient.
+            ik_signature: Some(crate::crypto::verification::sign_ik(
+                &self.signing_key,
+                &dh_public,
+            )),
             opk_public: None,
             opk_id: None,
             relay_url: None,
+            pq_spk_public: Some(spk.pq_public.0.clone()),
+            pq_spk_signature: Some(spk.pq_signature.clone()),
         }
     }
 
@@ -209,6 +264,9 @@ impl Identity {
         let spk_secret = derive_spk_for_epoch(&export.signing_key_bytes, export.spk_epoch);
         let spk_public = x25519_dalek::PublicKey::from(&spk_secret).to_bytes();
         let spk_signature = sign_spk(&signing_key, &spk_public);
+        let (pq_public, pq_secret) =
+            derive_pq_spk_for_epoch(&export.signing_key_bytes, export.spk_epoch);
+        let pq_signature = sign_pq_spk(&signing_key, &pq_public.0);
         let peer_id = PeerId(*signing_key.verifying_key().as_bytes());
         Ok(Identity {
             peer_id,
@@ -220,6 +278,9 @@ impl Identity {
                 secret: spk_secret,
                 public: spk_public,
                 signature: spk_signature,
+                pq_secret,
+                pq_public,
+                pq_signature,
             }),
         })
     }
@@ -244,6 +305,15 @@ pub struct PublicBundle {
     pub spk_public: [u8; 32],
     /// Ed25519 signature of spk_public by peer's signing key
     pub spk_signature: Vec<u8>,
+    /// Ed25519 signature by `peer_id` over `dh_public` — see
+    /// [`crate::crypto::verification`].
+    ///
+    /// `None` for bundles imported from contact cards older than v4, which never
+    /// bound the X3DH identity key to the identity.  Such a bundle is only
+    /// authenticated by TOFU, and a man-in-the-middle present at first contact
+    /// cannot be detected locally — only by comparing safety numbers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ik_signature: Option<Vec<u8>>,
     /// One-time pre-key public (X25519), if available
     #[serde(default)]
     pub opk_public: Option<[u8; 32]>,
@@ -253,6 +323,27 @@ pub struct PublicBundle {
     /// Optional iroh relay URL hint captured during contact exchange.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relay_url: Option<String>,
+    /// Optional post-quantum ML-KEM-768 signed pre-key (public key bytes, 1184 bytes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pq_spk_public: Option<Vec<u8>>,
+    /// Ed25519 signature of pq_spk_public by peer's signing key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pq_spk_signature: Option<Vec<u8>>,
+}
+
+impl PublicBundle {
+    /// Convert this `PublicBundle` to a `PreKeyBundle` for X3DH / PQXDH key agreement.
+    pub fn to_prekey_bundle(&self) -> PreKeyBundle {
+        PreKeyBundle {
+            ik_public: self.dh_public,
+            spk_public: self.spk_public,
+            spk_signature: self.spk_signature.clone(),
+            opk_public: self.opk_public,
+            opk_id: self.opk_id,
+            pq_spk_public: self.pq_spk_public.clone(),
+            pq_spk_signature: self.pq_spk_signature.clone(),
+        }
+    }
 }
 
 /// Per-contact ephemeral X25519 identity key.
@@ -297,5 +388,36 @@ impl PublicBundle {
         let sig = Signature::from_bytes(&sig_bytes);
         vk.verify(message, &sig)
             .map_err(|_| ADAError::InvalidSignature)
+    }
+
+    /// Verify that `dh_public` — the key X3DH actually uses — is bound to `peer_id`.
+    ///
+    /// Returns `Ok(false)` when the bundle carries no binding signature at all
+    /// (cards older than v4): that is a *downgrade*, not an error, and callers
+    /// should surface it as "keys not authenticated" rather than reject the contact.
+    pub fn ik_binding_verified(&self) -> Result<bool> {
+        let Some(signature) = self.ik_signature.as_deref() else {
+            return Ok(false);
+        };
+        crate::crypto::verification::verify_ik_signature(
+            &self.dh_public,
+            &self.peer_id.0,
+            signature,
+        )
+        .map(|()| true)
+    }
+
+    /// Strict variant of [`Self::ik_binding_verified`] for freshly imported bundles,
+    /// where an absent or invalid binding must be rejected outright.
+    pub fn require_ik_binding(&self) -> Result<()> {
+        let signature = self
+            .ik_signature
+            .as_deref()
+            .ok_or(ADAError::InvalidSignature)?;
+        crate::crypto::verification::verify_ik_signature(
+            &self.dh_public,
+            &self.peer_id.0,
+            signature,
+        )
     }
 }

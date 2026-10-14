@@ -172,6 +172,8 @@ impl PreKeyManager {
             spk_signature: self.spk.signature.clone(),
             opk_public,
             opk_id,
+            pq_spk_public: None,
+            pq_spk_signature: None,
         }
     }
 
@@ -203,6 +205,8 @@ impl PreKeyManager {
             spk_signature: identity.spk_signature(),
             opk_public,
             opk_id,
+            pq_spk_public: Some(identity.pq_spk_public().0),
+            pq_spk_signature: Some(identity.pq_spk_signature()),
         }
     }
 }

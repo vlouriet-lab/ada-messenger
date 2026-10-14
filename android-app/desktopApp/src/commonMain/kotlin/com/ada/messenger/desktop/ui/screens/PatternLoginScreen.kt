@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.ada.messenger.desktop.ui.components.PATTERN_CUBES
 import com.ada.messenger.desktop.ui.components.PatternBoardView
+import com.ada.messenger.desktop.ui.components.applyCellAction
 import com.ada.messenger.desktop.ui.components.cycleCell
 import kotlinx.coroutines.delay
 
@@ -53,6 +54,7 @@ fun PatternLoginScreen(
     onNewUser: () -> Unit,
 ) {
     var cells by remember { mutableStateOf<Map<Int, Int>>(emptyMap()) }
+    var activeColor by remember { mutableStateOf(0) }
     var localError by remember { mutableStateOf<String?>(null) }
     var shakeError by remember { mutableStateOf(false) }
     var showNewUserConfirm by remember { mutableStateOf(false) }
@@ -121,8 +123,10 @@ fun PatternLoginScreen(
 
                 PatternBoardView(
                     selectedCells = cells,
+                    activeColor = activeColor,
+                    onColorSelect = { activeColor = it },
                     onCellTap = { idx ->
-                        cells = cycleCell(cells, idx)
+                        cells = applyCellAction(cells, idx, activeColor)
                         localError = null
                         onClearError()
                     },

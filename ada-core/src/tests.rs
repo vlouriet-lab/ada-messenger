@@ -12,7 +12,7 @@ mod tests {
             prekeys::PreKeyManager,
             ratchet::RatchetState,
             symmetric::{decrypt, encrypt, generate_key, hkdf_derive},
-            x3dh::{x3dh_receive, x3dh_send},
+            x3dh::{pqxdh_receive, x3dh_send},
         },
         group::GroupManager,
         identity::Identity,
@@ -111,12 +111,14 @@ mod tests {
             .map(|o| StaticSecret::from(o.secret));
 
         let alice_ik_pub = x25519_dalek::PublicKey::from(&alice_ik).to_bytes();
-        let bob_shared = x3dh_receive(
+        let bob_shared = pqxdh_receive(
             &bob_ik,
             &bob_spk,
             bob_opk.as_ref(),
+            Some(&bob.pq_spk_secret()),
             alice_ik_pub,
             result.ephemeral_public,
+            result.pq_ciphertext.as_deref(),
         ).unwrap();
 
         assert_eq!(result.shared_secret, bob_shared);
@@ -142,16 +144,19 @@ mod tests {
             .opk_id_used
             .and_then(|id| bob_pk.consume_opk(id))
             .map(|o| StaticSecret::from(o.secret));
-        let bob_shared = x3dh_receive(
+        let bob_shared = pqxdh_receive(
             &bob_ik,
             &bob_spk,
             bob_opk.as_ref(),
+            Some(&bob.pq_spk_secret()),
             alice_ik_pub,
             x3dh_res.ephemeral_public,
+            x3dh_res.pq_ciphertext.as_deref(),
         ).unwrap();
 
-        let mut alice_r = RatchetState::init_sender(x3dh_res.shared_secret, bundle.spk_public);
-        let mut bob_r = RatchetState::init_receiver(bob_shared, *bob.spk_secret_bytes());
+        let their_pq = bundle.pq_spk_public.as_ref().map(|bytes| crate::crypto::pq::MlKem768PublicKey(bytes.clone()));
+        let mut alice_r = RatchetState::init_sender_pq(x3dh_res.shared_secret, bundle.spk_public, their_pq);
+        let mut bob_r = RatchetState::init_receiver_pq(bob_shared, *bob.spk_secret_bytes(), Some(bob.pq_spk_secret()), Some(bob.pq_spk_public()));
 
         // Alice → Bob
         let enc = alice_r.encrypt(b"Hello Bob!").unwrap();
@@ -180,16 +185,19 @@ mod tests {
             .opk_id_used
             .and_then(|id| bob_pk.consume_opk(id))
             .map(|o| StaticSecret::from(o.secret));
-        let bs = x3dh_receive(
+        let bs = pqxdh_receive(
             &bob_ik,
             &bob_spk,
             bob_opk.as_ref(),
+            Some(&bob.pq_spk_secret()),
             aik_pub,
             x3dh.ephemeral_public,
+            x3dh.pq_ciphertext.as_deref(),
         ).unwrap();
 
-        let mut ar = RatchetState::init_sender(x3dh.shared_secret, bundle.spk_public);
-        let mut br = RatchetState::init_receiver(bs, *bob.spk_secret_bytes());
+        let their_pq = bundle.pq_spk_public.as_ref().map(|bytes| crate::crypto::pq::MlKem768PublicKey(bytes.clone()));
+        let mut ar = RatchetState::init_sender_pq(x3dh.shared_secret, bundle.spk_public, their_pq);
+        let mut br = RatchetState::init_receiver_pq(bs, *bob.spk_secret_bytes(), Some(bob.pq_spk_secret()), Some(bob.pq_spk_public()));
 
         let e1 = ar.encrypt(b"msg 1").unwrap();
         let e2 = ar.encrypt(b"msg 2").unwrap();

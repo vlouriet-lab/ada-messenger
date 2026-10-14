@@ -32,25 +32,44 @@ import androidx.compose.ui.unit.sp
 const val BOARD_SIZE = 8
 const val PATTERN_CUBES = 16
 const val BOARD_CELLS = BOARD_SIZE * BOARD_SIZE  // 64
-const val PATTERN_COLORS = 3                      // colour indices 0, 1, 2
+const val PATTERN_COLORS = 5                      // colour indices 0, 1, 2, 3, 4
+
+/**
+ * Returns the theme/accent color for each pattern color index (0 to 4).
+ * 0: Primary (Indigo)
+ * 1: Secondary (Teal)
+ * 2: Tertiary (Peach/Amber)
+ * 3: Ruby Coral (#FF6E6E)
+ * 4: Emerald Green (#69F0AE)
+ */
+@Composable
+fun getPatternColor(colorIndex: Int?): Color {
+    val colorScheme = MaterialTheme.colorScheme
+    return when (colorIndex) {
+        0    -> colorScheme.primary
+        1    -> colorScheme.secondary
+        2    -> colorScheme.tertiary
+        3    -> Color(0xFFFF6E6E) // Ruby / Coral
+        4    -> Color(0xFF69F0AE) // Emerald / Mint
+        else -> colorScheme.surfaceVariant
+    }
+}
 
 // ── PatternBoardView ──────────────────────────────────────────────────────────
 
 /**
  * An interactive 8×8 grid where the user taps cells to place up to 16 coloured cubes.
  *
- * **Tap behaviour (cycle):**
- * - Empty cell  → colour 0 (primary)
- * - Colour 0    → colour 1 (secondary)
- * - Colour 1    → colour 2 (tertiary)
- * - Colour 2    → empty (removed)
+ * Supports both palette-based single-tap painting and cycling.
  *
- * @param selectedCells   Currently selected cells: Map<cellIndex(0-63), colorIndex(0-2)>.
- * @param onCellTap       Invoked with the cell index; the **caller** owns the cycling logic
- *                        (see [cycleCell] helper below).
+ * @param selectedCells   Currently selected cells: Map<cellIndex(0-63), colorIndex(0-4)>.
+ * @param onCellTap       Invoked with the cell index when a cell is clicked.
+ * @param activeColor     Currently selected color index in the palette (0 to 4).
+ * @param onColorSelect   Callback when user taps a color in the palette. When null, palette is hidden.
  * @param readOnly        When true the grid is non-interactive.
  * @param cellSize        Width & height of each cell.
  * @param showCounter     Whether to show the "X / 16" counter below the board.
+ * @param showPalette     Whether to display the 5-color palette selector.
  * @param shakeError      Toggle true→false to trigger a shake animation.
  */
 @Composable
@@ -58,9 +77,12 @@ fun PatternBoardView(
     selectedCells: Map<Int, Int>,
     onCellTap: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    activeColor: Int = 0,
+    onColorSelect: ((Int) -> Unit)? = null,
     readOnly: Boolean = false,
     cellSize: Dp = 36.dp,
     showCounter: Boolean = true,
+    showPalette: Boolean = true,
     shakeError: Boolean = false,
 ) {
     val haptic = LocalHapticFeedback.current
@@ -110,16 +132,97 @@ fun PatternBoardView(
             }
         }
 
+        if (showPalette && !readOnly && onColorSelect != null) {
+            Spacer(Modifier.height(10.dp))
+            PatternColorPalette(
+                selectedColor = activeColor,
+                onColorSelect = onColorSelect,
+            )
+        }
+
         if (showCounter) {
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(if (showPalette && onColorSelect != null) 6.dp else 12.dp))
             PatternCounter(count = selectedCells.size, target = PATTERN_CUBES)
         }
     }
 }
 
 /**
- * Convenience function for the parent's `onCellTap` handler.
- * Cycles: empty → 0 → 1 → 2 → empty.
+ * 5-color palette selector. Tapping a circle selects the active color for placement.
+ */
+@Composable
+fun PatternColorPalette(
+    selectedColor: Int,
+    onColorSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    Row(
+        modifier = modifier.padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        for (i in 0 until PATTERN_COLORS) {
+            val color = getPatternColor(i)
+            val isSelected = selectedColor == i
+            val scale by animateFloatAsState(
+                targetValue = if (isSelected) 1.25f else 1.0f,
+                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+                label = "paletteScale-$i"
+            )
+            val borderAlpha by animateFloatAsState(
+                targetValue = if (isSelected) 1f else 0.35f,
+                animationSpec = tween(150),
+                label = "paletteBorder-$i"
+            )
+
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .scale(scale)
+                    .shadow(if (isSelected) 6.dp else 2.dp, RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(color)
+                    .border(
+                        width = if (isSelected) 2.5.dp else 1.dp,
+                        color = Color.White.copy(alpha = borderAlpha),
+                        shape = RoundedCornerShape(16.dp),
+                    )
+                    .clickable(enabled = enabled) { onColorSelect(i) },
+                contentAlignment = Alignment.Center
+            ) {
+                if (isSelected) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color.White)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Palette-based action:
+ * - If cell is empty and count < 16: places activeColor.
+ * - If cell already has activeColor: removes it (toggle off in 1 tap).
+ * - If cell has another color: recolors to activeColor in 1 tap.
+ */
+fun applyCellAction(current: Map<Int, Int>, index: Int, activeColor: Int): Map<Int, Int> {
+    val existing = current[index]
+    return when {
+        existing == null && current.size < PATTERN_CUBES -> current + (index to activeColor)
+        existing == null -> current // limit reached
+        existing == activeColor -> current - index // erase on second tap
+        else -> current + (index to activeColor) // recolor
+    }
+}
+
+/**
+ * Convenience function for the parent's `onCellTap` handler (legacy cycling).
+ * Cycles: empty → 0 → 1 → 2 → 3 → 4 → empty.
  * Does NOT add a new cube when the limit is already reached (returns unchanged map).
  */
 fun cycleCell(current: Map<Int, Int>, index: Int): Map<Int, Int> {
@@ -144,18 +247,12 @@ private fun PatternCell(
 ) {
     val colorScheme = MaterialTheme.colorScheme
 
-    // Map colour index → Material3 role colours
-    val targetBgColor = when (colorIndex) {
-        0    -> colorScheme.primary
-        1    -> colorScheme.secondary
-        2    -> colorScheme.tertiary
-        else -> colorScheme.surfaceVariant
-    }
-    val targetBorderColor = when (colorIndex) {
-        0    -> colorScheme.primary.copy(alpha = 0.7f)
-        1    -> colorScheme.secondary.copy(alpha = 0.7f)
-        2    -> colorScheme.tertiary.copy(alpha = 0.7f)
-        else -> colorScheme.outline.copy(alpha = 0.25f)
+    // Map colour index → palette colours
+    val targetBgColor = getPatternColor(colorIndex)
+    val targetBorderColor = if (colorIndex != null) {
+        targetBgColor.copy(alpha = 0.7f)
+    } else {
+        colorScheme.outline.copy(alpha = 0.25f)
     }
 
     val bgColor by animateColorAsState(
@@ -225,6 +322,8 @@ private fun PatternCell(
                     0    -> "Cell $index colour primary"
                     1    -> "Cell $index colour secondary"
                     2    -> "Cell $index colour tertiary"
+                    3    -> "Cell $index colour ruby"
+                    4    -> "Cell $index colour emerald"
                     else -> "Cell $index"
                 }
             }

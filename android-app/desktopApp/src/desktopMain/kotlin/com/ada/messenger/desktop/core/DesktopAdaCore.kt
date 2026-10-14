@@ -119,6 +119,7 @@ class DesktopAdaCore private constructor(private val handle: Long) {
     private external fun nativeMarkRead(handle: Long, convId: String): Int
     private external fun nativeDeleteMessage(handle: Long, msgIdHex: String): Int
     private external fun nativeDeleteMessageForEveryone(handle: Long, peerIdB64: String, msgIdHex: String): Int
+    private external fun nativeIsPeerPostQuantum(handle: Long, peerIdB64: String): Int
     private external fun nativeCallAudio(handle: Long, peerIdB64: String, offerSdp: String): String?
     private external fun nativeCallVideo(handle: Long, peerIdB64: String, offerSdp: String): String?
     private external fun nativeAnswerCall(handle: Long, callIdHex: String, peerIdB64: String, answerSdp: String): Int
@@ -212,6 +213,10 @@ class DesktopAdaCore private constructor(private val handle: Long) {
 
     fun deleteMessageForEveryone(peerIdB64: String, msgIdHex: String): Boolean =
         withHandle { nativeDeleteMessageForEveryone(it, peerIdB64, msgIdHex) == 0 } ?: false
+
+    /** Returns true if communication with this contact is protected by Post-Quantum cryptography. */
+    fun isPeerPostQuantum(peerIdB64: String): Boolean =
+        withHandle { nativeIsPeerPostQuantum(it, peerIdB64) == 1 } ?: false
 
     fun callAudioDetailed(peerIdB64: String, offerSdp: String): DesktopCallStartResult =
         withHandle { activeHandle ->

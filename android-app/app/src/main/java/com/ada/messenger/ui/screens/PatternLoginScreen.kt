@@ -23,6 +23,7 @@ import com.ada.messenger.R
 import androidx.compose.ui.res.stringResource
 import com.ada.messenger.ui.components.PATTERN_CUBES
 import com.ada.messenger.ui.components.PatternBoardView
+import com.ada.messenger.ui.components.applyCellAction
 import com.ada.messenger.ui.components.cycleCell
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -61,6 +62,7 @@ fun PatternLoginScreen(
     val appLock = viewModel.appLock
 
     var cells by remember { mutableStateOf(mapOf<Int, Int>()) }
+    var activeColor by remember { mutableStateOf(0) }
     var shakeError by remember { mutableStateOf(false) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var loginRequested by remember { mutableStateOf(false) }
@@ -179,10 +181,13 @@ fun PatternLoginScreen(
 
             PatternBoardView(
                 selectedCells = cells,
+                activeColor = activeColor,
+                onColorSelect = { activeColor = it },
                 onCellTap = { idx ->
-                    cells = cycleCell(cells, idx)
+                    cells = applyCellAction(cells, idx, activeColor)
                     errorMsg = null
                 },
+                shakeError = shakeError,
                 showCounter = true,
             )
 

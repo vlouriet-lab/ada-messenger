@@ -32,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.ada.messenger.desktop.ui.components.PatternBoardView
+import com.ada.messenger.desktop.ui.components.applyCellAction
 import com.ada.messenger.desktop.ui.components.cycleCell
 import kotlinx.coroutines.delay
 
@@ -56,6 +57,7 @@ fun SnapshotPatternScreen(
     var step by remember { mutableStateOf(SnapshotRegStep.DRAW) }
     var firstPattern by remember { mutableStateOf<Map<Int, Int>>(emptyMap()) }
     var confirmPattern by remember { mutableStateOf<Map<Int, Int>>(emptyMap()) }
+    var activeColor by remember { mutableStateOf(0) }
     var localError by remember { mutableStateOf<String?>(null) }
     var shakeError by remember { mutableStateOf(false) }
 
@@ -132,8 +134,10 @@ fun SnapshotPatternScreen(
                         Spacer(Modifier.height(16.dp))
                         PatternBoardView(
                             selectedCells = firstPattern,
+                            activeColor = activeColor,
+                            onColorSelect = { activeColor = it },
                             onCellTap = { idx ->
-                                firstPattern = cycleCell(firstPattern, idx)
+                                firstPattern = applyCellAction(firstPattern, idx, activeColor)
                                 localError = null
                                 onClearError()
                             },
@@ -165,8 +169,10 @@ fun SnapshotPatternScreen(
                         Spacer(Modifier.height(16.dp))
                         PatternBoardView(
                             selectedCells = confirmPattern,
+                            activeColor = activeColor,
+                            onColorSelect = { activeColor = it },
                             onCellTap = { idx ->
-                                confirmPattern = cycleCell(confirmPattern, idx)
+                                confirmPattern = applyCellAction(confirmPattern, idx, activeColor)
                                 localError = null
                                 onClearError()
                             },

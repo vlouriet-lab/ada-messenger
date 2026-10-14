@@ -4,11 +4,11 @@
 //!
 //! The user places exactly `PATTERN_CUBES` (16) coloured cubes on a
 //! `BOARD_SIZE`×`BOARD_SIZE` (8×8) grid.  Each cube can be one of
-//! `PATTERN_COLORS` (3) colours.  The user is free to use 1, 2, or all 3
+//! `PATTERN_COLORS` (5) colours.  The user is free to use 1, 2, 3, 4, or all 5
 //! colours — the choice is part of the secret.
 //!
 //! ```text
-//! Pattern (16 cells, each = (cell_idx: 0–63, color_idx: 0–2))
+//! Pattern (16 cells, each = (cell_idx: 0–63, color_idx: 0–4))
 //!   ↓ canonical: sort by cell_idx ascending → 32 bytes [idx0,col0, idx1,col1, …]
 //!   ↓ Argon2id (64 MiB, t=3, p=1, salt=PATTERN_SALT)
 //!   ↓ 32-byte master_seed
@@ -22,7 +22,7 @@
 //!
 //! ## Security note
 //!
-//! C(64,16) × 3^16  ≈  2.1 × 10^22  ≈  74 bits of raw entropy — more than
+//! C(64,16) × 5^16  ≈  7.45 × 10^25  ≈  86 bits of raw entropy — more than
 //! enough with Argon2id stretching, even against dedicated-hardware attacks.
 
 use crate::error::{ADAError, Result};
@@ -38,8 +38,8 @@ use sha2::Sha256;
 pub const BOARD_SIZE: usize = 8;
 pub const BOARD_CELLS: usize = BOARD_SIZE * BOARD_SIZE; // 64
 pub const PATTERN_CUBES: usize = 16;
-/// Number of available cube colours (0 = primary, 1 = secondary, 2 = tertiary).
-pub const PATTERN_COLORS: u8 = 3;
+/// Number of available cube colours (0 to 4).
+pub const PATTERN_COLORS: u8 = 5;
 /// Byte length of the canonical password fed to Argon2id:
 /// 2 bytes per cube (cell_idx, color_idx) × 16 cubes = 32 bytes.
 pub const PATTERN_KEY_BYTES: usize = PATTERN_CUBES * 2; // 32
@@ -264,6 +264,20 @@ pub struct PatternContactCard {
     /// One-time pre-key numeric id (decimal string).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub opk_id: String,
+    /// v4+: Ed25519 signature by `id` over the X3DH identity key the recipient must
+    /// use — `ephemeral_ik` when present, otherwise `ik` (base64).
+    ///
+    /// Cards older than v4 carry no such signature, so their `ik` was never bound to
+    /// the identity: a rewritten card could substitute the X3DH key and sit in the
+    /// middle while the `spk_sig` check still passed.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub ik_sig: String,
+    /// Optional base64-encoded ML-KEM-768 public key (1184 bytes).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub pq_spk: String,
+    /// Optional base64-encoded Ed25519 signature of pq_spk.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub pq_spk_sig: String,
 }
 
 /// Build the QR payload JSON for a given identity.
@@ -282,24 +296,32 @@ pub fn contact_card_json(
         None => (String::new(), String::new()),
     };
     let card = PatternContactCard {
-        v: 2,
+        v: 4,
         id: b64.encode(&identity.peer_id.0),
         spk: b64.encode(identity.spk_public()),
         ik: b64.encode(ik_pub.as_bytes()),
         spk_sig: b64.encode(identity.spk_signature()),
         name: identity.display_name.clone(),
         relay_url: relay_url.unwrap_or_default().to_string(),
-        ephemeral_ik: String::new(), // v2: no ephemeral key
+        ephemeral_ik: String::new(), // v4: the long-term IK is used directly
         opk: opk_str,
         opk_id: opk_id_str,
+        ik_sig: b64.encode(crate::crypto::verification::sign_ik(
+            &identity.signing_key,
+            ik_pub.as_bytes(),
+        )),
+        pq_spk: b64.encode(&identity.pq_spk_public().0),
+        pq_spk_sig: b64.encode(identity.pq_spk_signature()),
     };
     serde_json::to_string(&card).map_err(ADAError::Json)
 }
 
-/// Build a v3 ephemeral contact card.
+/// Build a v4 ephemeral contact card.
 /// Includes a per-contact X25519 `ephemeral_ik` so recipients perform X3DH
 /// against a key unique to this chat — preventing cross-contact session
 /// correlation when the same identity is shared via multiple QR codes.
+/// The card signs *that* key rather than the long-term IK, so the key the
+/// recipient's X3DH uses is still bound to the identity.
 pub fn ephemeral_contact_card_json(
     identity: &Identity,
     ephemeral_pub: &[u8; 32],
@@ -309,7 +331,7 @@ pub fn ephemeral_contact_card_json(
     let b64 = base64::engine::general_purpose::STANDARD;
     let ik_pub = x25519_dalek::PublicKey::from(&identity.dh_key);
     let card = PatternContactCard {
-        v: 3,
+        v: 4,
         id: b64.encode(identity.peer_id.0),
         spk: b64.encode(identity.spk_public()),
         ik: b64.encode(ik_pub.as_bytes()),
@@ -319,6 +341,14 @@ pub fn ephemeral_contact_card_json(
         ephemeral_ik: b64.encode(ephemeral_pub),
         opk: String::new(),
         opk_id: String::new(),
+        // The recipient uses `ephemeral_ik` as the X3DH identity key, so that is the
+        // key this signature must cover.
+        ik_sig: b64.encode(crate::crypto::verification::sign_ik(
+            &identity.signing_key,
+            ephemeral_pub,
+        )),
+        pq_spk: b64.encode(&identity.pq_spk_public().0),
+        pq_spk_sig: b64.encode(identity.pq_spk_signature()),
     };
     serde_json::to_string(&card).map_err(ADAError::Json)
 }
@@ -398,9 +428,18 @@ mod tests {
     }
 
     #[test]
+    fn pattern_key_accepts_five_colors() {
+        let mut pairs = sample_pairs();
+        for (i, pair) in pairs.iter_mut().enumerate() {
+            pair.1 = (i % 5) as u8;
+        }
+        assert!(PatternKey::new(&pairs).is_ok());
+    }
+
+    #[test]
     fn pattern_key_rejects_invalid_color() {
         let mut pairs = sample_pairs();
-        pairs[5] = (pairs[5].0, 3); // color 3 is out of range
+        pairs[5] = (pairs[5].0, 5); // color 5 is out of range (allowed: 0..4)
         assert!(PatternKey::new(&pairs).is_err());
     }
 
@@ -537,12 +576,74 @@ mod tests {
             .unwrap();
         let card: PatternContactCard = parse_contact_card(&json).unwrap();
         assert_eq!(card.name, "Alice");
-        assert_eq!(card.v, 2);
+        assert_eq!(card.v, 4);
         assert_eq!(card.relay_url, "https://euw1-1.relay.iroh.network./");
         use base64::Engine;
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(&card.id)
             .unwrap();
         assert_eq!(decoded, identity.peer_id.0);
+    }
+
+    /// A v4 card must bind the X3DH identity key to the Ed25519 identity, and the
+    /// signature must cover the key the recipient will actually use.
+    #[test]
+    fn contact_card_binds_the_x3dh_identity_key() {
+        use base64::Engine;
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let pk = PatternKey::new(&sample_pairs()).unwrap();
+        let identity = derive_identity_from_pattern(&pk, "Alice", "").unwrap();
+
+        let card: PatternContactCard =
+            parse_contact_card(&contact_card_json(&identity, None, None).unwrap()).unwrap();
+        let ik: [u8; 32] = b64.decode(&card.ik).unwrap().try_into().unwrap();
+        let signature = b64.decode(&card.ik_sig).unwrap();
+
+        crate::crypto::verification::verify_ik_signature(&ik, &identity.peer_id.0, &signature)
+            .expect("the long-term IK must be signed by the identity");
+
+        // Swapping the IK must break verification: that is the whole point.
+        assert!(crate::crypto::verification::verify_ik_signature(
+            &[0xAB; 32],
+            &identity.peer_id.0,
+            &signature
+        )
+        .is_err());
+    }
+
+    /// Incognito (v4) cards are verified against the *ephemeral* key the recipient
+    /// uses for X3DH, not the long-term IK carried alongside it.
+    #[test]
+    fn ephemeral_contact_card_signs_the_ephemeral_key() {
+        use base64::Engine;
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let pk = PatternKey::new(&sample_pairs()).unwrap();
+        let identity = derive_identity_from_pattern(&pk, "Alice", "").unwrap();
+        let ephemeral = crate::identity::EphemeralContactKey::generate();
+
+        let card: PatternContactCard = parse_contact_card(
+            &ephemeral_contact_card_json(&identity, &ephemeral.public, None).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(card.v, 4);
+        let signature = b64.decode(&card.ik_sig).unwrap();
+
+        crate::crypto::verification::verify_ik_signature(
+            &ephemeral.public,
+            &identity.peer_id.0,
+            &signature,
+        )
+        .expect("the ephemeral IK must be signed by the identity");
+
+        let long_term_ik: [u8; 32] = b64.decode(&card.ik).unwrap().try_into().unwrap();
+        assert!(
+            crate::crypto::verification::verify_ik_signature(
+                &long_term_ik,
+                &identity.peer_id.0,
+                &signature
+            )
+            .is_err(),
+            "the signature must not also validate the unused long-term IK"
+        );
     }
 }

@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.ada.messenger.desktop.ui.components.PATTERN_CUBES
 import com.ada.messenger.desktop.ui.components.PatternBoardView
+import com.ada.messenger.desktop.ui.components.applyCellAction
 import com.ada.messenger.desktop.ui.components.cycleCell
 import kotlinx.coroutines.delay
 
@@ -70,6 +71,7 @@ fun PatternRegistrationScreen(
     var step by remember { mutableStateOf(RegStep.DRAW) }
     var firstPattern by remember { mutableStateOf<Map<Int, Int>>(emptyMap()) }
     var confirmPattern by remember { mutableStateOf<Map<Int, Int>>(emptyMap()) }
+    var activeColor by remember { mutableStateOf(0) }
     var nickname by remember { mutableStateOf("") }
     var pin by remember { mutableStateOf("") }
     var confirmPin by remember { mutableStateOf("") }
@@ -137,13 +139,15 @@ fun PatternRegistrationScreen(
                     when (currentStep) {
                         RegStep.DRAW -> RegistrationDrawStep(
                             title = "Создание профиля",
-                            subtitle = "Выберите 16 ячеек. Повторное нажатие меняет цвет.",
+                            subtitle = "Выберите цвет в палитре и отметьте 16 ячеек.",
                             cells = firstPattern,
+                            activeColor = activeColor,
+                            onColorSelect = { activeColor = it },
                             shakeError = shakeError,
                             hintText = errorText,
                             hintIsError = !errorText.isNullOrBlank(),
                             onCellTap = { idx ->
-                                val next = cycleCell(firstPattern, idx)
+                                val next = applyCellAction(firstPattern, idx, activeColor)
                                 if (next == firstPattern && firstPattern.size >= PATTERN_CUBES && firstPattern[idx] == null) {
                                     localError = "Можно выбрать только 16 кубиков"
                                     shakeError = true
@@ -178,11 +182,13 @@ fun PatternRegistrationScreen(
                             title = "Подтверждение",
                             subtitle = "Повторите тот же рисунок.",
                             cells = confirmPattern,
+                            activeColor = activeColor,
+                            onColorSelect = { activeColor = it },
                             shakeError = shakeError,
                             hintText = errorText,
                             hintIsError = !errorText.isNullOrBlank(),
                             onCellTap = { idx ->
-                                confirmPattern = cycleCell(confirmPattern, idx)
+                                confirmPattern = applyCellAction(confirmPattern, idx, activeColor)
                                 localError = null
                                 onClearError()
                             },
@@ -383,6 +389,8 @@ private fun RegistrationDrawStep(
     title: String,
     subtitle: String,
     cells: Map<Int, Int>,
+    activeColor: Int = 0,
+    onColorSelect: ((Int) -> Unit)? = null,
     shakeError: Boolean,
     hintText: String?,
     hintIsError: Boolean,
@@ -401,6 +409,8 @@ private fun RegistrationDrawStep(
         StepHeader(title = title, subtitle = subtitle)
         PatternBoardView(
             selectedCells = cells,
+            activeColor = activeColor,
+            onColorSelect = onColorSelect,
             onCellTap = onCellTap,
             shakeError = shakeError,
             showCounter = true,

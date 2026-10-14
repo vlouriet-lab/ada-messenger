@@ -1,4 +1,4 @@
-﻿package com.ada.messenger.core
+package com.ada.messenger.core
 
 import android.util.Log
 
@@ -209,6 +209,12 @@ class AdaCore private constructor(private val handle: Long) {
 
     fun deleteMessageForEveryone(peerIdB64: String, msgIdHex: String): Boolean =
         withHandle { nativeDeleteMessageForEveryone(it, peerIdB64, msgIdHex) == 0 } ?: false
+
+    private external fun nativeIsPeerPostQuantum(handle: Long, peerIdB64: String): Int
+
+    /** Returns true if communication with this contact is protected by Post-Quantum cryptography. */
+    fun isPeerPostQuantum(peerIdB64: String): Boolean =
+        withHandle { nativeIsPeerPostQuantum(it, peerIdB64) == 1 } ?: false
 
     // ── Event polling ──────────────────────────────────────────────────────
     /**

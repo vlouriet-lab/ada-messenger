@@ -30,6 +30,31 @@ Out of scope:
 - Vulnerabilities requiring a rooted/compromised device or physical access.
 - Social‑engineering and third‑party infrastructure not in this repository.
 
+## Post-Quantum Cryptography & Pattern Authentication
+
+ADA Messenger incorporates NIST FIPS 203 ML-KEM-768 for quantum-resistant
+key encapsulation alongside classical X25519 Diffie-Hellman in a hybrid
+configuration:
+- **PQXDH Key Agreement**: Hybrid pre-key bundles combine classical X25519 with
+  ML-KEM-768 encapsulation, defeating Harvest-Now-Decrypt-Later (HNDL) attacks.
+- **SPQR (Signal Post-Quantum Ratchet)**: Asymmetric ratchet steps rotate both
+  X25519 and ML-KEM-768 keys to provide quantum forward secrecy.
+- **Pattern Authentication Entropy**: The visual pattern password uses 16 cells
+  chosen from an 8×8 grid with 5 distinct colors ($C(64, 16) \times 5^{16} \approx 7.45 \times 10^{25} \approx 85.9\text{ bits}$
+  of raw entropy), derived via Argon2id (64 MiB, $t=3, p=1$).
+For detailed cryptographic specifications, see
+[`docs/architecture/POST_QUANTUM_AND_DPI.md`](docs/architecture/POST_QUANTUM_AND_DPI.md).
+
+## Key verification and its limits
+
+Identity keys are bound to contact cards by signature and pinned on first use;
+users can compare a 60-digit safety number out-of-band. What that does and, more
+importantly, does not detect is documented in
+[`docs/architecture/CONTACT_VERIFICATION.md`](docs/architecture/CONTACT_VERIFICATION.md)
+— please read it before reporting a "key substitution" issue, since a
+man-in-the-middle present at *first* contact is only detectable by comparing safety
+numbers, not locally.
+
 ## Handling of secrets
 
 This repository must never contain real secrets. Signing keystores

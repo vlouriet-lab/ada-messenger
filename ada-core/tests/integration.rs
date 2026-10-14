@@ -116,6 +116,8 @@ fn import_contact_from_card(core: &Arc<ADACore>, contact_card_json: &str) {
             spk_signature: spk_signature.clone(),
             opk_public: None,
             opk_id: None,
+            pq_spk_public: None,
+            pq_spk_signature: None,
         };
         bundle_for_verify
             .verify_spk_signature(&peer_id_bytes)
@@ -128,9 +130,14 @@ fn import_contact_from_card(core: &Arc<ADACore>, contact_card_json: &str) {
         display_name: card.name,
         spk_public,
         spk_signature,
+        // This helper builds the legacy v2 card shape on purpose (no IK binding), so
+        // the imported bundle is TOFU-only — exactly what a v2 card produces.
+        ik_signature: None,
         opk_public: None,
         opk_id: None,
         relay_url: None,
+        pq_spk_public: None,
+        pq_spk_signature: None,
     })
     .expect("contact import should persist peer bundle");
 }

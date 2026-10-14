@@ -30,6 +30,7 @@ import com.ada.messenger.R
 import androidx.compose.ui.res.stringResource
 import com.ada.messenger.ui.components.PATTERN_CUBES
 import com.ada.messenger.ui.components.PatternBoardView
+import com.ada.messenger.ui.components.applyCellAction
 import com.ada.messenger.ui.components.cycleCell
 
 // ── Registration steps ─────────────────────────────────────────────────────────
@@ -71,6 +72,7 @@ fun PatternRegistrationScreen(
     // Cell colour maps for each step
     var firstPattern by remember { mutableStateOf(mapOf<Int, Int>()) }
     var confirmPattern by remember { mutableStateOf(mapOf<Int, Int>()) }
+    var activeColor by remember { mutableStateOf(0) }
     var nickname by remember { mutableStateOf("") }
 
     var shakeError by remember { mutableStateOf(false) }
@@ -138,8 +140,10 @@ fun PatternRegistrationScreen(
                     title = stringResource(R.string.pattern_register_step1_title),
                     subtitle = stringResource(R.string.pattern_register_step1_subtitle),
                     cells = firstPattern,
+                    activeColor = activeColor,
+                    onColorSelect = { activeColor = it },
                     onCellTap = { idx ->
-                        val next = cycleCell(firstPattern, idx)
+                        val next = applyCellAction(firstPattern, idx, activeColor)
                         firstPattern = next
                         if (next.size > PATTERN_CUBES) shakeError = true
                     },
@@ -165,8 +169,10 @@ fun PatternRegistrationScreen(
                     title = stringResource(R.string.pattern_register_step2_title),
                     subtitle = stringResource(R.string.pattern_register_step2_subtitle),
                     cells = confirmPattern,
+                    activeColor = activeColor,
+                    onColorSelect = { activeColor = it },
                     onCellTap = { idx ->
-                        confirmPattern = cycleCell(confirmPattern, idx)
+                        confirmPattern = applyCellAction(confirmPattern, idx, activeColor)
                         confirmMismatch = false
                     },
                     shakeError = shakeError,
@@ -226,6 +232,8 @@ private fun DrawStep(
     subtitle: String,
     cells: Map<Int, Int>,
     onCellTap: (Int) -> Unit,
+    activeColor: Int = 0,
+    onColorSelect: ((Int) -> Unit)? = null,
     shakeError: Boolean,
     onClear: () -> Unit,
     onNext: () -> Unit,
@@ -263,6 +271,8 @@ private fun DrawStep(
         PatternBoardView(
             selectedCells = cells,
             onCellTap = onCellTap,
+            activeColor = activeColor,
+            onColorSelect = onColorSelect,
             shakeError = shakeError,
             showCounter = true,
         )

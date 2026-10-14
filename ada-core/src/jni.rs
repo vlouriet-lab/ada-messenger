@@ -239,6 +239,16 @@ pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nati
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativeIsPeerPostQuantum(
+    env: JNIEnv,
+    obj: JObject,
+    handle: jlong,
+    peer_b64: JString,
+) -> jint {
+    Java_com_ada_messenger_core_AdaCore_nativeIsPeerPostQuantum(env, obj, handle, peer_b64)
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativeGetMessagesJson(
     env: JNIEnv,
     obj: JObject,
@@ -3356,4 +3366,22 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeStopWebRtcPro
     };
 
     crate::ffi::ada_stop_webrtc_proxy(handle as *const AdaCoreHandle, peer_c.as_ptr());
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeIsPeerPostQuantum(
+    mut env: JNIEnv,
+    _obj: JObject,
+    handle: jlong,
+    peer_b64: JString,
+) -> jint {
+    let peer_str: String = match env.get_string(&peer_b64) {
+        Ok(s) => s.into(),
+        Err(_) => return 0,
+    };
+    let peer_c = match CString::new(peer_str) {
+        Ok(c) => c,
+        Err(_) => return 0,
+    };
+    crate::ffi::ada_is_peer_post_quantum(handle as *const AdaCoreHandle, peer_c.as_ptr()) as jint
 }
