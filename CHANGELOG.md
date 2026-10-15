@@ -2,7 +2,7 @@
 
 All notable changes to ADA Messenger are documented here.
 
-## [Unreleased]
+## [0.5.0-beta] — 2026-10-15
 
 ### Added
 - `iroh-gossip` integration (`ada-core/src/network/gossip.rs`): High-scale topic-based

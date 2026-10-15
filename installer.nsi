@@ -17,7 +17,7 @@ SetCompressor /SOLID lzma
 ; ── Compile-time variables ────────────────────────────────────────────────────
 ; VERSION is passed via /DVERSION=x.y.z from makensis command line.
 !ifndef VERSION
-  !define VERSION "0.3.54"
+  !define VERSION "0.5.0"
 !endif
 
 !define APPNAME   "ADA Messenger"

@@ -19,7 +19,7 @@ dependencies = [
 
 [[package]]
 name = "ada-core"
-version = "0.2.1"
+version = "0.5.0"
 dependencies = [
  "aes-gcm",
  "android_logger",
