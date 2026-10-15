@@ -3,7 +3,7 @@
 ## Android
 
 ### From a release (recommended)
-1. Open the [Releases](../../releases) page and download the latest
+1. Open the [Releases](https://github.com/vlouriet-lab/ada-messenger/releases) page and download the latest
    `ada-messenger-*.apk`.
 2. On your phone, allow installing apps from your browser/file manager
    (*Settings → Apps → Special access → Install unknown apps*).
@@ -20,7 +20,7 @@ adb install -r ada-messenger-debug.apk
 ## Windows
 
 ### From a release (recommended)
-1. Download the latest `ADA-Messenger-Setup-*.exe` from [Releases](../../releases).
+1. Download the latest `ADA-Messenger-Setup-*.exe` from [Releases](https://github.com/vlouriet-lab/ada-messenger/releases).
 2. Run the installer and follow the prompts.
 3. On first launch, Windows SmartScreen may warn that the publisher is
    unverified. Choose **More info → Run anyway**. This happens because the
