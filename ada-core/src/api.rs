@@ -343,6 +343,8 @@ pub struct ADACore {
     /// blob transfers.  Uses n0's public relay infrastructure on port 443
     /// (stealth HTTPS) with automatic hole-punching for direct P2P.
     iroh: RwLock<Option<Arc<IrohTransport>>>,
+    /// Gossip overlay service for group messaging, key rotation, and call signaling.
+    pub(crate) gossip: RwLock<Option<Arc<crate::network::gossip::AdaGossipService>>>,
 
     // Event channel to UI
     event_tx: mpsc::Sender<ADAEvent>,
@@ -968,6 +970,7 @@ impl ADACore {
             group_call_rooms_by_session: parking_lot::RwLock::new(std::collections::HashMap::new()),
             group_call_session_by_call: parking_lot::RwLock::new(std::collections::HashMap::new()),
             iroh: RwLock::new(None),
+            gossip: RwLock::new(None),
             event_tx,
             event_rx: RwLock::new(Some(event_rx)),
             transfer_rx: RwLock::new(Some(transfer_rx)),
@@ -1141,9 +1144,34 @@ impl ADACore {
                 );
             }
         }
-        *self.iroh.write().await = Some(Arc::new(transport));
+        let transport_arc = Arc::new(transport);
+        *self.iroh.write().await = Some(transport_arc.clone());
         self.iroh_started
             .store(true, std::sync::atomic::Ordering::Release);
+
+        let (gossip_tx, mut gossip_rx) = mpsc::channel(256);
+        let gossip_service = Arc::new(crate::network::gossip::AdaGossipService::new(
+            transport_arc.gossip.clone(),
+            self.identity.clone(),
+            gossip_tx,
+        ));
+        *self.gossip.write().await = Some(gossip_service.clone());
+
+        let weak_gossip = Arc::downgrade(self);
+        let gossip_task = tokio::spawn(async move {
+            while let Some(envelope) = gossip_rx.recv().await {
+                if let Some(core) = weak_gossip.upgrade() {
+                    core.handle_gossip_envelope(envelope).await;
+                } else {
+                    break;
+                }
+            }
+        });
+        self.tasks.write().await.push(gossip_task);
+
+        for group in self.groups.list_groups() {
+            let _ = self.ensure_group_gossip_subscribed(group.id).await;
+        }
 
         let weak = Arc::downgrade(self);
         let iroh_task = tokio::spawn(async move {
@@ -4341,14 +4369,194 @@ impl ADACore {
             })
             .unwrap_or_default();
 
-        for member_peer in &members {
-            if member_peer == &self.identity.peer_id {
-                continue;
+        let mut broadcasted_via_gossip = false;
+        if let Some(gossip) = self.gossip.read().await.as_ref() {
+            if gossip.is_subscribed(&group_id).await {
+                let payload = crate::network::gossip::GossipPayload::ChatMessage {
+                    ciphertext: wire_bytes.clone(),
+                    sequence_number: 0,
+                };
+                match gossip.broadcast(&group_id, payload).await {
+                    Ok(()) => {
+                        broadcasted_via_gossip = true;
+                        tracing::debug!(
+                            "Group message {} broadcasted via iroh-gossip for group {}",
+                            hex::encode(id),
+                            hex::encode(group_id)
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "iroh-gossip broadcast failed for group {}: {}, falling back to unicast fan-out",
+                            hex::encode(group_id),
+                            e
+                        );
+                    }
+                }
             }
-            self.deliver_wire(member_peer, id, wire_bytes.clone()).await;
+        }
+
+        if !broadcasted_via_gossip {
+            for member_peer in &members {
+                if member_peer == &self.identity.peer_id {
+                    continue;
+                }
+                self.deliver_wire(member_peer, id, wire_bytes.clone()).await;
+            }
         }
 
         Ok(id)
+    }
+
+    /// Subscribes to the gossip overlay topic for the specified group if not already subscribed.
+    pub async fn ensure_group_gossip_subscribed(&self, group_id: [u8; 16]) -> Result<()> {
+        let gossip = self.gossip.read().await.clone();
+        let Some(gossip) = gossip else {
+            return Ok(());
+        };
+        if gossip.is_subscribed(&group_id).await {
+            return Ok(());
+        }
+        let bootstrap_peers: Vec<[u8; 32]> = self
+            .groups
+            .get_group(&group_id)
+            .map(|g| g.members.iter().map(|m| m.peer_id.0).collect())
+            .unwrap_or_default();
+        gossip
+            .subscribe_group(group_id, bootstrap_peers)
+            .await
+            .map_err(|e| ADAError::Network(e.to_string()))
+    }
+
+    /// Dispatches verified gossip envelopes received from the overlay.
+    async fn handle_gossip_envelope(&self, envelope: crate::network::gossip::GossipEnvelope) {
+        match envelope.payload {
+            crate::network::gossip::GossipPayload::ChatMessage { ciphertext, .. } => {
+                if let Ok(wire_env) = bincode::deserialize::<WireEnvelope>(&ciphertext) {
+                    if let WireEnvelope::Group(skm) = wire_env {
+                        self.receive_group_wire(envelope.sender_peer_id, skm).await;
+                    }
+                }
+            }
+            crate::network::gossip::GossipPayload::SenderKeyDistribution { sender_key_bytes, .. } => {
+                if let Ok(dist) = bincode::deserialize::<crate::group::sender_keys::SenderKeyDistribution>(&sender_key_bytes) {
+                    let _ = self.groups.install_peer_key(envelope.group_id, dist);
+                }
+            }
+            crate::network::gossip::GossipPayload::CallSignal(signal) => {
+                self.handle_group_call_signal(envelope.group_id, envelope.sender_peer_id, signal).await;
+            }
+            crate::network::gossip::GossipPayload::Presence { status } => {
+                tracing::debug!(
+                    "Gossip presence for peer {} in group {}: status {}",
+                    hex::encode(envelope.sender_peer_id),
+                    hex::encode(envelope.group_id),
+                    status
+                );
+            }
+        }
+    }
+
+    /// Handles call signaling messages disseminated via gossip.
+    async fn handle_group_call_signal(
+        &self,
+        _group_id: [u8; 16],
+        sender: [u8; 32],
+        signal: crate::network::gossip::GroupCallSignal,
+    ) {
+        use crate::network::gossip::GroupCallSignal;
+        match signal {
+            GroupCallSignal::JoinRequest { call_id } => {
+                if let Some(room) = self.get_group_call_room_for_call(call_id) {
+                    if room.participants.len() >= crate::network::gossip::MAX_GROUP_CALL_PARTICIPANTS {
+                        tracing::warn!(
+                            "Group call {} reached maximum participants limit (6). Rejecting join from {}",
+                            hex::encode(call_id),
+                            hex::encode(sender)
+                        );
+                        return;
+                    }
+                }
+                tracing::info!(
+                    "Group call join request received from {} for call {}",
+                    hex::encode(sender),
+                    hex::encode(call_id)
+                );
+            }
+            GroupCallSignal::Offer { target_peer_id, .. } => {
+                if target_peer_id == self.identity.peer_id.0 {
+                    tracing::info!("[call] Received group call offer from {}", hex::encode(sender));
+                }
+            }
+            GroupCallSignal::Answer { call_id, target_peer_id, sdp } => {
+                if target_peer_id == self.identity.peer_id.0 {
+                    tracing::info!("[call] Received group call answer from {}", hex::encode(sender));
+                    if let Err(e) = self.call_mgr.set_remote_sdp(call_id, sdp.clone()).await {
+                        tracing::warn!("set_remote_sdp failed: {}", e);
+                    } else {
+                        let (has_video, peer) = self
+                            .call_mgr
+                            .active_calls_info()
+                            .await
+                            .into_iter()
+                            .find(|(id, ..)| *id == call_id)
+                            .map(|(_, p, hv, _, _)| (hv, p))
+                            .unwrap_or((false, PeerId(sender)));
+                        let state = crate::media::call::CallState::Active {
+                            started_at: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs(),
+                            has_video,
+                        };
+                        self.calls_connected_total
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let _ = self
+                            .event_tx
+                            .send(ADAEvent::CallStateChanged {
+                                call_id,
+                                peer,
+                                has_video,
+                                state,
+                                answer_sdp: Some(sdp),
+                            })
+                            .await;
+                    }
+                }
+            }
+            GroupCallSignal::IceCandidate { call_id, target_peer_id, candidate, sdp_mid, sdp_mline_index } => {
+                if target_peer_id == self.identity.peer_id.0 {
+                    let _ = self
+                        .event_tx
+                        .send(ADAEvent::IceCandidate {
+                            call_id,
+                            peer: PeerId(sender),
+                            candidate,
+                            sdp_mid,
+                            sdp_mline_index,
+                        })
+                        .await;
+                }
+            }
+            GroupCallSignal::MediaState { call_id, audio_muted, video_muted, screenshare } => {
+                tracing::debug!(
+                    "Group call media state update for peer {} in call {}: audio_muted={}, video_muted={}, screenshare={}",
+                    hex::encode(sender),
+                    hex::encode(call_id),
+                    audio_muted,
+                    video_muted,
+                    screenshare
+                );
+            }
+            GroupCallSignal::Leave { call_id } => {
+                tracing::info!(
+                    "Peer {} left group call {}",
+                    hex::encode(sender),
+                    hex::encode(call_id)
+                );
+            }
+            GroupCallSignal::ParticipantList { .. } => {}
+        }
     }
 
     /// Process an incoming encrypted wire message (called by network layer)
@@ -4624,6 +4832,7 @@ impl ADACore {
 
                     // Join group: installs inviter's key + generates our own sender key
                     let our_dist = self.groups.join_group_and_init(group, inviter_dist);
+                    let _ = self.ensure_group_gossip_subscribed(*group_id).await;
 
                     // Send our distribution back to the inviter
                     if let Ok(accept_bytes) = bincode::serialize(&our_dist) {
@@ -4811,6 +5020,7 @@ impl ADACore {
     pub async fn create_group(&self, name: &str) -> ([u8; 16], String) {
         let (id, _dist) = self.groups.create_group(name);
         let topic = self.groups.group_topic(&id).unwrap_or_default();
+        let _ = self.ensure_group_gossip_subscribed(id).await;
         tracing::info!("Created group '{}' with ID {}", name, hex::encode(id));
         (id, topic)
     }
@@ -5253,8 +5463,11 @@ impl ADACore {
         }
     }
 
-    fn group_call_members(&self, group_id: [u8; 16], has_video: bool) -> Result<Vec<PeerId>> {
-        let max_peers: usize = if has_video { 7 } else { 15 };
+    fn group_call_members(&self, group_id: [u8; 16], _has_video: bool) -> Result<Vec<PeerId>> {
+        // Enforce hard cap of MAX_GROUP_CALL_PARTICIPANTS (6) across all group calls:
+        // 5 remote peers + 1 local peer = 6 total participants.
+        let max_remote_peers: usize =
+            crate::network::gossip::MAX_GROUP_CALL_PARTICIPANTS.saturating_sub(1);
         let my_peer_id = self.identity.peer_id.clone();
         let group = self
             .list_groups()
@@ -5266,7 +5479,7 @@ impl ADACore {
             .into_iter()
             .filter(|member| member.peer_id != my_peer_id)
             .map(|member| member.peer_id)
-            .take(max_peers)
+            .take(max_remote_peers)
             .collect())
     }
 
@@ -5292,6 +5505,9 @@ impl ADACore {
     ) -> Result<[u8; 16]> {
         self.ensure_realtime_capable().await?;
         let participants = self.group_call_room_participants(group_id, has_video)?;
+        if participants.len() > crate::network::gossip::MAX_GROUP_CALL_PARTICIPANTS {
+            return Err(ADAError::Call("Group call participant limit exceeded (maximum 6 participants)".into()));
+        }
 
         if announce_room {
             self.announce_group_call(group_id, session_id, has_video)
@@ -5333,6 +5549,9 @@ impl ADACore {
         has_video: bool,
     ) -> Result<()> {
         let participants = self.group_call_room_participants(group_id, has_video)?;
+        if participants.len() > crate::network::gossip::MAX_GROUP_CALL_PARTICIPANTS {
+            return Err(ADAError::Call("Group call participant limit exceeded (maximum 6 participants)".into()));
+        }
         self.register_group_call_room(group_id, session_id, has_video, participants, &[call_id]);
         Ok(())
     }

@@ -25,9 +25,9 @@ ada-core/           — Ядро на Rust (компилируется как .s
     api.rs          — Публичный API (ADACore, ADAEvent)
 ```
 
-**Крипто-стек:** Ed25519 (identity) · X25519 (DH) · X3DH (key agreement) · Double Ratchet · AES-256-GCM · HKDF-SHA256  
-**Сеть:** iroh 0.31 (единственный транспорт: QUIC + relay NAT traversal + pkarr DNS discovery) · группы через iroh unicast fan-out  
-**Протокол:** Protocol Buffers (prost) для wire-форматов
+**Крипто-стек:** Ed25519 (identity) · X25519 (DH) · X3DH / PQXDH (ML-KEM-768) · Double Ratchet (SPQR) · AES-256-GCM · HKDF-SHA256  
+**Сеть:** iroh 0.96.1 (QUIC + relay NAT traversal + pkarr DNS discovery) · `iroh-gossip` 0.96.0 (HyParView + PlumTree) для масштабируемых групповых чатов (100+ пиров) и сигналинга звонков · прямой Full-Mesh WebRTC/QUIC для медиапотоков (жёсткий лимит до 6 участников)  
+**Протокол:** Protocol Buffers (prost) + Bincode для wire-форматов
 
 ---
 

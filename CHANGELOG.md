@@ -5,6 +5,18 @@ All notable changes to ADA Messenger are documented here.
 ## [Unreleased]
 
 ### Added
+- `iroh-gossip` integration (`ada-core/src/network/gossip.rs`): High-scale topic-based
+  pub/sub overlay (HyParView membership + PlumTree broadcast) for group chats,
+  SenderKey distribution, presence, and call signaling. Eliminates $O(N)$ unicast
+  fan-out overhead, enabling groups to scale to 100+ peers seamlessly.
+- Blind Gossip Topics: Topics are derived as `BLAKE3(group_id || "ada-gossip-topic-v1")`,
+  ensuring group IDs and memberships are never revealed in network overlay headers.
+- Cryptographic `GossipEnvelope`: All gossip messages are signed with Ed25519 identity
+  keys and verified against group membership prior to processing.
+- Direct Media Plane with 6-Participant Hard Cap: Voice (Opus) and video (VP8/H.264)
+  streams remain on direct Full-Mesh WebRTC / Iroh QUIC streams to guarantee $< 150$ ms
+  low latency without multi-hop jitter, enforced by a strict protocol and UI limit of
+  $\le 6$ active participants (`MAX_GROUP_CALL_PARTICIPANTS = 6`).
 - Post-quantum hybrid encryption: NIST FIPS 203 ML-KEM-768 integration,
   PQXDH key agreement (`PreKeyBundle` with signed `pq_spk_public`), and hybrid
   Double Ratchet (SPQR) with per-step KEM rotation to protect against

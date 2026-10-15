@@ -89,6 +89,20 @@ impl PeerId {
         use base64::Engine;
         base64::engine::general_purpose::STANDARD.encode(self.0)
     }
+
+    /// Verify an Ed25519 signature over a message using this PeerId's public key.
+    pub fn verify_signature(&self, message: &[u8], signature_bytes: &[u8]) -> bool {
+        if signature_bytes.len() != 64 {
+            return false;
+        }
+        let Ok(vk) = VerifyingKey::from_bytes(&self.0) else {
+            return false;
+        };
+        let mut sig_arr = [0u8; 64];
+        sig_arr.copy_from_slice(signature_bytes);
+        let sig = Signature::from_bytes(&sig_arr);
+        vk.verify(message, &sig).is_ok()
+    }
 }
 
 impl std::fmt::Display for PeerId {
@@ -221,6 +235,11 @@ impl Identity {
 
     pub fn sign(&self, message: &[u8]) -> Vec<u8> {
         self.signing_key.sign(message).to_bytes().to_vec()
+    }
+
+    /// Sign a message and return the 64-byte Ed25519 signature array.
+    pub fn sign_64(&self, message: &[u8]) -> [u8; 64] {
+        self.signing_key.sign(message).to_bytes()
     }
 
     pub fn public_bundle(&self) -> PublicBundle {

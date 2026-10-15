@@ -45,6 +45,23 @@ configuration:
 For detailed cryptographic specifications, see
 [`docs/architecture/POST_QUANTUM_AND_DPI.md`](docs/architecture/POST_QUANTUM_AND_DPI.md).
 
+## Group Gossip & Real-Time Call Security
+
+Group messaging, SenderKey distributions, and call signaling utilize an authenticated
+`iroh-gossip` overlay (HyParView + PlumTree), while real-time media streams remain strictly
+isolated:
+- **Blind Topic Derivation**: Gossip topic identifiers are computed as
+  `TopicId = BLAKE3(group_id || "ada-gossip-topic-v1")`. The cleartext `group_id` is never
+  exposed in network headers or relay discovery metadata.
+- **Signed Envelopes (`GossipEnvelope`)**: Every gossip frame is authenticated with an
+  Ed25519 signature over `BLAKE3(group_id || sender || timestamp || payload)`. Unsigned or
+  tampered packets are dropped immediately before entering application state.
+- **Strict Media Plane Isolation**: Real-time voice and video streams (WebRTC / QUIC) never
+  pass through the gossip overlay tree to eliminate multi-hop jitter and latency. Media sessions
+  are capped at a hard limit of 6 participants (`MAX_GROUP_CALL_PARTICIPANTS = 6`).
+For detailed architectural specifications, see
+[`docs/architecture/IROH_GOSSIP_INTEGRATION_PLAN.md`](docs/architecture/IROH_GOSSIP_INTEGRATION_PLAN.md).
+
 ## Key verification and its limits
 
 Identity keys are bound to contact cards by signature and pinned on first use;
