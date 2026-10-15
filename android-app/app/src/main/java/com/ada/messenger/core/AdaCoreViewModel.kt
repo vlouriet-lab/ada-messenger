@@ -224,6 +224,13 @@ class AdaCoreViewModel(private val appContext: Context) : ViewModel() {
     private val _peerTyping = MutableStateFlow(false)
     val peerTyping: StateFlow<Boolean> = _peerTyping.asStateFlow()
 
+    // ── Contact Security & Verification ──────────────────────────────────
+    private val _contactKeyChangeEvents = MutableStateFlow<ContactKeyChangeEvent?>(null)
+    val contactKeyChangeEvents: StateFlow<ContactKeyChangeEvent?> = _contactKeyChangeEvents.asStateFlow()
+
+    private val _verifiedContacts = MutableStateFlow<Set<String>>(emptySet())
+    val verifiedContacts: StateFlow<Set<String>> = _verifiedContacts.asStateFlow()
+
     // ── Delegate accessors (call state) ──────────────────────────────────
 
     val incomingCall: StateFlow<IncomingCallInfo?> get() = callManager.incomingCall
@@ -594,6 +601,7 @@ class AdaCoreViewModel(private val appContext: Context) : ViewModel() {
         _initialized.value = true
         startEventPolling()
         refreshConversations()
+        refreshVerifiedContacts()
         refreshGroups()
         refreshCallHistory()
         transferManager.refresh()
@@ -673,6 +681,86 @@ class AdaCoreViewModel(private val appContext: Context) : ViewModel() {
         return runCatching { core?.addContactFromJson(contactCardJson) ?: false }
             .onFailure { Log.e(TAG, "addContactFromQr failed", it) }
             .getOrDefault(false)
+    }
+
+    // ── Contact Safety & Verification (Safety Numbers) ─────────────────────
+
+    fun dismissContactKeyChangeEvent() {
+        _contactKeyChangeEvents.value = null
+    }
+
+    suspend fun getContactSecurity(peerIdB64: String): ContactSecurityInfo? = withContext(Dispatchers.IO) {
+        val json = core?.getContactSecurityJson(peerIdB64) ?: return@withContext null
+        parseContactSecurity(json)
+    }
+
+    fun markContactVerified(peerIdB64: String, onDone: (() -> Unit)? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = core?.markContactVerified(peerIdB64) ?: false
+            if (ok) {
+                refreshVerifiedContacts()
+                refreshConversations()
+            }
+            withContext(Dispatchers.Main) { onDone?.invoke() }
+        }
+    }
+
+    fun clearContactVerified(peerIdB64: String, onDone: (() -> Unit)? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = core?.clearContactVerified(peerIdB64) ?: false
+            if (ok) {
+                refreshVerifiedContacts()
+                refreshConversations()
+            }
+            withContext(Dispatchers.Main) { onDone?.invoke() }
+        }
+    }
+
+    fun acceptContactKeyChange(peerIdB64: String, onDone: (() -> Unit)? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = core?.acceptContactKeyChange(peerIdB64) ?: false
+            if (_contactKeyChangeEvents.value?.peerIdB64 == peerIdB64) {
+                _contactKeyChangeEvents.value = null
+            }
+            if (ok) {
+                refreshVerifiedContacts()
+                refreshConversations()
+            }
+            withContext(Dispatchers.Main) { onDone?.invoke() }
+        }
+    }
+
+    fun rejectContactKeyChange(peerIdB64: String, onDone: (() -> Unit)? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = core?.rejectContactKeyChange(peerIdB64) ?: false
+            if (_contactKeyChangeEvents.value?.peerIdB64 == peerIdB64) {
+                _contactKeyChangeEvents.value = null
+            }
+            if (ok) {
+                refreshVerifiedContacts()
+                refreshConversations()
+            }
+            withContext(Dispatchers.Main) { onDone?.invoke() }
+        }
+    }
+
+    fun refreshVerifiedContacts() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val json = core?.listContactSecurityJson() ?: return@launch
+            try {
+                val arr = org.json.JSONArray(json)
+                val set = mutableSetOf<String>()
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    if (obj.optBoolean("verified", false)) {
+                        set.add(obj.optString("peer_id"))
+                    }
+                }
+                _verifiedContacts.value = set
+            } catch (e: Exception) {
+                Log.e(TAG, "refreshVerifiedContacts failed", e)
+            }
+        }
     }
 
     fun generateContactLink(): String? {
@@ -1845,6 +1933,21 @@ class AdaCoreViewModel(private val appContext: Context) : ViewModel() {
                 // Also refresh messages if it's the active direct conversation
                 val updatedPeer = event.raw.optString("peer_id")
                 if (activeConvId == "d:$updatedPeer") {
+                    refreshMessages(activeConvId!!)
+                }
+            }
+            "ContactKeyChanged" -> {
+                val peerId = event.raw.optString("peer_id")
+                val safetyNumber = event.raw.optString("safety_number")
+                val ikAuthenticated = event.raw.optBoolean("ik_authenticated", false)
+                _contactKeyChangeEvents.value = ContactKeyChangeEvent(
+                    peerIdB64 = peerId,
+                    safetyNumber = safetyNumber,
+                    ikAuthenticated = ikAuthenticated,
+                )
+                refreshVerifiedContacts()
+                refreshConversations()
+                if (activeConvId == "d:$peerId") {
                     refreshMessages(activeConvId!!)
                 }
             }

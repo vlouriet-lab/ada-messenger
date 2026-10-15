@@ -448,6 +448,32 @@ class AdaCore private constructor(private val handle: Long) {
         return withHandle { nativeAddRelayNode(it, relayUrl) == 0 } ?: false
     }
 
+    // ── Contact Safety & Verification ──────────────────────────────────────
+    private external fun nativeGetContactSecurityJson(handle: Long, peerIdB64: String): String?
+    private external fun nativeListContactSecurityJson(handle: Long): String?
+    private external fun nativeMarkContactVerified(handle: Long, peerIdB64: String): Int
+    private external fun nativeClearContactVerified(handle: Long, peerIdB64: String): Int
+    private external fun nativeAcceptContactKeyChange(handle: Long, peerIdB64: String): Int
+    private external fun nativeRejectContactKeyChange(handle: Long, peerIdB64: String): Int
+
+    fun getContactSecurityJson(peerIdB64: String): String =
+        withHandle { nativeGetContactSecurityJson(it, peerIdB64) } ?: "{}"
+
+    fun listContactSecurityJson(): String =
+        withHandle { nativeListContactSecurityJson(it) } ?: "[]"
+
+    fun markContactVerified(peerIdB64: String): Boolean =
+        withHandle { nativeMarkContactVerified(it, peerIdB64) == 0 } ?: false
+
+    fun clearContactVerified(peerIdB64: String): Boolean =
+        withHandle { nativeClearContactVerified(it, peerIdB64) == 0 } ?: false
+
+    fun acceptContactKeyChange(peerIdB64: String): Boolean =
+        withHandle { nativeAcceptContactKeyChange(it, peerIdB64) == 0 } ?: false
+
+    fun rejectContactKeyChange(peerIdB64: String): Boolean =
+        withHandle { nativeRejectContactKeyChange(it, peerIdB64) == 0 } ?: false
+
     // ── Incognito chats ────────────────────────────────────────────────────
 
     /**

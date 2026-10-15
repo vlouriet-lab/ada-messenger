@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">ADA Messenger</string>
 
@@ -116,6 +116,7 @@
     <string name="chat_action_voice_message">Voice message</string>
     <string name="chat_image_saved">Image saved</string>
     <string name="chat_image_save_failed">Failed to save image</string>
+    <string name="chat_swipe_cancel_lock_hint">&lt; Swipe cancel | ^ Lock</string>
 
     <!-- Message actions dialog -->
     <string name="dialog_message_title">Message</string>
@@ -290,6 +291,7 @@
 
     <!-- Pattern registration (remaining) -->
     <string name="pattern_register_step2_next">Confirm</string>
+    <string name="pattern_register_step2_retry">Change initial pattern</string>
     <string name="recovery_import_open_button">Recover account</string>
 
     <!-- Profile creation (remaining) -->
@@ -449,13 +451,13 @@
     <string name="conn_orange">Limited — calls unavailable</string>
     <string name="conn_red">No connection</string>
     <string name="conn_with_route">%1$s - %2$s</string>
-    <string name="conn_route_iroh_live">live iroh</string>
-    <string name="conn_route_bridge">bridge</string>
-    <string name="conn_route_local_mesh">local mesh</string>
-    <string name="conn_route_mailbox">mailbox</string>
-    <string name="conn_route_offline_queue">queued</string>
-    <string name="conn_route_relay_only_deferred">queued relay-only</string>
-    <string name="conn_route_failed">failed</string>
+    <string name="conn_route_iroh_live">Direct P2P (Iroh)</string>
+    <string name="conn_route_bridge">Secure Bridge</string>
+    <string name="conn_route_local_mesh">Offline Mesh (BLE/Wi-Fi)</string>
+    <string name="conn_route_mailbox">Mailbox (Peer Offline)</string>
+    <string name="conn_route_offline_queue">Queued Offline</string>
+    <string name="conn_route_relay_only_deferred">Queued via Relay</string>
+    <string name="conn_route_failed">Delivery Failed</string>
 
     <string name="peer_presence_live">live on iroh</string>
     <string name="peer_presence_not_live">not on live iroh</string>
@@ -509,4 +511,31 @@
     <string name="error_pin_wrong">Incorrect PIN</string>
     <string name="error_pin_wrong_current">Incorrect current PIN</string>
     <string name="error_pin_no_pattern_data">No data &#8212; log in with pattern</string>
+    <string name="chat_menu_safety_numbers">Safety numbers</string>
+    <string name="security_sheet_title">Contact Safety Numbers</string>
+    <string name="security_sheet_subtitle">Compare these numbers with %s or scan the QR code to verify end-to-end encryption.</string>
+    <string name="security_sheet_mark_verified">Mark contact as verified</string>
+    <string name="security_sheet_verified_desc">When verified, a green badge appears next to the contact\'s name. You will be alerted immediately if their key ever changes.</string>
+    <string name="security_sheet_copy_numbers">Copy numbers</string>
+    <string name="security_sheet_copied">Safety numbers copied to clipboard</string>
+    <string name="security_sheet_card_auth">Identity: Card v4 Signed (Authenticated)</string>
+    <string name="security_sheet_card_tofu">Identity: Unsigned Key (TOFU)</string>
+    <string name="security_sheet_pq_active">Quantum Protection: Active (ML-KEM-768)</string>
+    <string name="security_sheet_pq_classic">Quantum Protection: Classic (X25519)</string>
+    <string name="security_sheet_safety_digits_title">Safety digits (60)</string>
+    <string name="security_sheet_close">Close</string>
+
+    <string name="contact_key_change_title">Security Key Changed</string>
+    <string name="contact_key_change_warning">Encryption key for %s has changed. This may indicate an app reinstallation or an interception attempt.</string>
+    <string name="contact_key_change_verify">Verify</string>
+    <string name="contact_key_change_accept">Accept</string>
+    <string name="contact_key_change_reject">Reject</string>
+
+    <string name="unknown_contact_banner_text">This contact is not saved in your contacts list.</string>
+    <string name="unknown_contact_action_save">Add</string>
+    <string name="unknown_contact_action_block">Block</string>
+    <string name="call_self_view_label">You</string>
+    <string name="group_mesh_p2p_notice">Groups operate fully peer-to-peer (P2P Mesh). The 16-member limit ensures stability and saves battery.</string>
+    <string name="chat_file_saved">File saved</string>
+    <string name="chat_file_save_failed">Failed to save file</string>
 </resources>

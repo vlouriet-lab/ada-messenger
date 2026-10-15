@@ -39,6 +39,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -94,6 +95,7 @@ import coil.decode.VideoFrameDecoder
 import coil.request.ImageRequest
 import com.ada.messenger.core.AdaCoreViewModel
 import com.ada.messenger.core.ChatMessage
+import com.ada.messenger.core.ContactSecurityInfo
 import com.ada.messenger.core.ConversationItem
 import com.ada.messenger.R
 import com.ada.messenger.ui.components.MediaRecorderHelper
@@ -291,6 +293,21 @@ fun ChatScreen(
     // Online presence
     val onlinePeers by viewModel.onlinePeers.collectAsState()
     val isPeerOnline = peerIdB64?.let { it in onlinePeers }
+
+    // Contact security & verified state
+    var showSecuritySheet by remember { mutableStateOf(false) }
+    var securityInfo by remember { mutableStateOf<ContactSecurityInfo?>(null) }
+    val verifiedContacts by viewModel.verifiedContacts.collectAsState()
+    val isPeerVerified = peerIdB64?.let { it in verifiedContacts } ?: false
+    val keyChangeEvent by viewModel.contactKeyChangeEvents.collectAsState()
+    val currentKeyChangeEvent = if (keyChangeEvent?.peerIdB64 == peerIdB64) keyChangeEvent else null
+
+    LaunchedEffect(peerIdB64, showSecuritySheet) {
+        val b64 = peerIdB64 ?: return@LaunchedEffect
+        if (showSecuritySheet) {
+            securityInfo = viewModel.getContactSecurity(b64)
+        }
+    }
 
     var pendingCallPeer by remember { mutableStateOf<String?>(null) }
     var pendingVideoCallPeer by remember { mutableStateOf<String?>(null) }
@@ -536,8 +553,28 @@ fun ChatScreen(
                     actionIconContentColor = MaterialTheme.colorScheme.onBackground,
                 ),
                 title = {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(currentDisplayName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.clickable {
+                            if (peerIdB64 != null) {
+                                showSecuritySheet = true
+                            }
+                        }
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(currentDisplayName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (isPeerVerified) {
+                                Icon(
+                                    imageVector = Icons.Filled.VerifiedUser,
+                                    contentDescription = "Verified",
+                                    tint = Color(0xFF66BB6A),
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
+                        }
                         if (isPeerOnline != null) {
                             Text(
                                 text = stringResource(
@@ -604,6 +641,20 @@ fun ChatScreen(
                             onDismissRequest = { showOverflowMenu = false },
                         ) {
                             if (peerIdB64 != null) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.chat_menu_safety_numbers)) },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Filled.Shield,
+                                            contentDescription = null,
+                                            tint = if (isPeerVerified) Color(0xFF66BB6A) else MaterialTheme.colorScheme.onSurface,
+                                        )
+                                    },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        showSecuritySheet = true
+                                    },
+                                )
                                 DropdownMenuItem(
                                     text = { Text(stringResource(R.string.chat_action_rename_contact)) },
                                     onClick = {
@@ -680,12 +731,139 @@ fun ChatScreen(
             )
         }
 
+        if (showSecuritySheet && securityInfo != null && peerIdB64 != null) {
+            ContactSecuritySheet(
+                securityInfo = securityInfo!!,
+                displayName = currentDisplayName,
+                isVerified = isPeerVerified,
+                onToggleVerified = { mark ->
+                    if (mark) {
+                        viewModel.markContactVerified(peerIdB64)
+                    } else {
+                        viewModel.clearContactVerified(peerIdB64)
+                    }
+                    scope.launch {
+                        securityInfo = viewModel.getContactSecurity(peerIdB64)
+                    }
+                },
+                onDismiss = { showSecuritySheet = false },
+            )
+        }
+
         Column(modifier = Modifier.padding(padding).fillMaxSize().chatBackgroundPattern(chatPattern)) {
             // ── Connection health bar ─────────────────────────────────────
             com.ada.messenger.ui.components.ConnectionStatusBar(
                 level = connectionLevel,
                 lastOutcome = lastTransportOutcome,
             )
+            // ── Key Change Warning Banner ──────────────────────────────────
+            if (currentKeyChangeEvent != null && peerIdB64 != null) {
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Filled.Warning,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = stringResource(R.string.contact_key_change_title),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = stringResource(R.string.contact_key_change_warning, currentDisplayName),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            OutlinedButton(
+                                onClick = { showSecuritySheet = true },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(stringResource(R.string.contact_key_change_verify), maxLines = 1)
+                            }
+                            Button(
+                                onClick = { viewModel.acceptContactKeyChange(peerIdB64) },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(stringResource(R.string.contact_key_change_accept), maxLines = 1)
+                            }
+                            TextButton(
+                                onClick = { viewModel.rejectContactKeyChange(peerIdB64) },
+                            ) {
+                                Text(stringResource(R.string.contact_key_change_reject), maxLines = 1)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── Unknown Contact Banner ─────────────────────────────────────
+            val hasSavedAlias = remember(peerIdB64, currentDisplayName) {
+                peerIdB64 != null && viewModel.getContactAlias(peerIdB64).isNotBlank()
+            }
+            if (!hasSavedAlias && peerIdB64 != null && !isPeerVerified) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.unknown_contact_banner_text),
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 8.dp),
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            FilledTonalButton(
+                                onClick = {
+                                    contactAliasDraft = viewModel.getContactAlias(peerIdB64)
+                                    showRenameContactDialog = true
+                                },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            ) {
+                                Text(
+                                    stringResource(R.string.unknown_contact_action_save),
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = { showClearDialog = true },
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            ) {
+                                Text(
+                                    stringResource(R.string.unknown_contact_action_block),
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
             // ──────────────────────────────────────────────────────────────
             LazyColumn(
                 state = listState,
@@ -806,42 +984,6 @@ fun ChatScreen(
                 }
             }
             // V-9: Reply-to preview bar
-            AnimatedVisibility(visible = replyToMsg != null) {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .width(3.dp)
-                                .height(32.dp)
-                                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp)),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = if (replyToMsg?.isMine == true) stringResource(R.string.chat_reply_you) else (replyToMsg?.senderName ?: ""),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                            Text(
-                                text = replyToMsg?.text ?: "",
-                                style = MaterialTheme.typography.bodySmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        IconButton(onClick = { replyToMsg = null }) {
-                            Icon(Icons.Default.Close, contentDescription = stringResource(R.string.button_cancel), modifier = Modifier.size(18.dp))
-                        }
-                    }
-                }
-            }
-            // Validation and visual states for reply/edit
             AnimatedVisibility(visible = replyToMsg != null) {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceVariant,
@@ -1647,7 +1789,7 @@ private fun MessageBubble(
 
                                 if (annotated.getStringAnnotations("URL", 0, annotated.length).isEmpty()) {
                                     Text(
-                                        text = msg.text,
+                                        text = annotated,
                                         style = MaterialTheme.typography.bodyMedium,
                                     )
                                 } else {
@@ -2431,6 +2573,18 @@ private fun AddMemberDialog(
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = stringResource(R.string.group_mesh_p2p_notice),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(8.dp),
+                    )
+                }
                 if (availableContacts.isNotEmpty()) {
                     Text(stringResource(R.string.group_contacts_header), style = MaterialTheme.typography.labelMedium)
                     LazyColumn(
@@ -2591,6 +2745,9 @@ private fun GroupChatScreen(
     var manualPeerId by remember { mutableStateOf("") }
     var replyToMsg by remember { mutableStateOf<ChatMessage?>(null) }
     var editingMsg by remember { mutableStateOf<ChatMessage?>(null) }
+    var openImage by remember { mutableStateOf<OpenImagePayload?>(null) }
+    var pendingSaveImage by remember { mutableStateOf<OpenImagePayload?>(null) }
+    var pendingSaveFile by remember { mutableStateOf<Pair<String, String>?>(null) }
     val chatPrefs = remember { context.getSharedPreferences("ada_chat_prefs", android.content.Context.MODE_PRIVATE) }
     var chatPattern by remember { mutableStateOf(ChatPattern.entries.getOrElse(chatPrefs.getInt("chat_pattern_$convId", 0)) { ChatPattern.SOLID }) }
     val recorderHelper = remember { com.ada.messenger.ui.components.MediaRecorderHelper(context) }
@@ -2652,6 +2809,53 @@ private fun GroupChatScreen(
                 viewModel.sendAttachment(convId, fileName, mimeType, localPath)
             } catch (e: Exception) {
                 android.util.Log.e("GroupChatScreen", "filePicker read failed: ${e.message}")
+            }
+        }
+    }
+
+    val saveImageLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("image/*")
+    ) { uri: Uri? ->
+        val payload = pendingSaveImage
+        pendingSaveImage = null
+        if (uri == null || payload == null) return@rememberLauncherForActivityResult
+        scope.launch(Dispatchers.IO) {
+            val ok = runCatching {
+                val src = File(payload.localPath)
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    src.inputStream().use { input -> input.copyTo(out) }
+                } != null
+            }.getOrDefault(false)
+            withContext(Dispatchers.Main) {
+                if (ok) {
+                    scope.launch { snackbarState.showSnackbar(context.getString(R.string.chat_image_saved)) }
+                } else {
+                    scope.launch { snackbarState.showSnackbar(context.getString(R.string.chat_image_save_failed)) }
+                }
+            }
+        }
+    }
+
+    val saveFileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("*/*")
+    ) { uri: Uri? ->
+        val fileInfo = pendingSaveFile
+        pendingSaveFile = null
+        if (uri == null || fileInfo == null) return@rememberLauncherForActivityResult
+        scope.launch(Dispatchers.IO) {
+            val (srcPath, _) = fileInfo
+            val ok = runCatching {
+                val src = File(srcPath)
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    src.inputStream().use { input -> input.copyTo(out) }
+                } != null
+            }.getOrDefault(false)
+            withContext(Dispatchers.Main) {
+                if (ok) {
+                    scope.launch { snackbarState.showSnackbar(context.getString(R.string.chat_file_saved)) }
+                } else {
+                    scope.launch { snackbarState.showSnackbar(context.getString(R.string.chat_file_save_failed)) }
+                }
             }
         }
     }
@@ -2947,9 +3151,15 @@ private fun GroupChatScreen(
                                 onToggleReaction = { emoji ->
                                     viewModel.toggleReaction(convId, item.msg.id, emoji, item.msg.myReactions)
                                 },
-                                onOpenImage = { _, _ -> },
+                                onOpenImage = { path, fileName ->
+                                    openImage = OpenImagePayload(path, fileName)
+                                },
                                 onOpenUrl = onOpenUrl,
                                 onOpenAdaLink = onOpenAdaLink,
+                                onSaveFile = { path, name ->
+                                    pendingSaveFile = path to name
+                                    saveFileLauncher.launch(name)
+                                },
                                 onJoinGroupCall = { sessionId, hasVideo ->
                                     if (activeGroupCall?.callSessionId == sessionId) {
                                         onStartCall()
@@ -3249,6 +3459,77 @@ private fun GroupChatScreen(
                 },
                 onDismiss = { showInviteDialog = false },
             )
+        }
+
+        // Attachment bottom sheet
+        if (showAttachSheet) {
+            AttachmentBottomSheet(
+                onDismiss = { showAttachSheet = false },
+                onPickImage = {
+                    showAttachSheet = false
+                    imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                },
+                onPickVideo = {
+                    showAttachSheet = false
+                    videoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+                },
+                onPickFile = {
+                    showAttachSheet = false
+                    scope.launch {
+                        delay(150)
+                        filePicker.launch(arrayOf("*/*"))
+                    }
+                },
+            )
+        }
+
+        if (openImage != null) {
+            val payload = openImage!!
+            Dialog(onDismissRequest = { openImage = null }) {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(File(payload.localPath))
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = payload.fileName,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 220.dp, max = 560.dp)
+                                .clip(RoundedCornerShape(16.dp)),
+                        )
+                        Text(
+                            text = payload.fileName.removePrefix("📎 "),
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            TextButton(onClick = { openImage = null }) {
+                                Text(stringResource(R.string.button_close))
+                            }
+                            TextButton(onClick = {
+                                pendingSaveImage = payload
+                                saveImageLauncher.launch(payload.fileName.removePrefix("📎 "))
+                            }) {
+                                Text(stringResource(R.string.button_save))
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

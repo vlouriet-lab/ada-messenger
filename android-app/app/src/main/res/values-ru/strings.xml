@@ -122,6 +122,7 @@
     <string name="chat_action_voice_message">Голосовое сообщение</string>
     <string name="chat_image_saved">Изображение сохранено</string>
     <string name="chat_image_save_failed">Не удалось сохранить изображение</string>
+    <string name="chat_swipe_cancel_lock_hint">&lt; Смахните для отмены | ^ Закрепить</string>
 
     
     <string name="dialog_message_title">Сообщение</string>
@@ -301,6 +302,7 @@
 
     
     <string name="pattern_register_step2_next">Подтвердить</string>
+    <string name="pattern_register_step2_retry">Изменить начальный узор</string>
     <string name="recovery_import_open_button">Восстановить аккаунт</string>
 
     
@@ -460,13 +462,13 @@ websocket ada-edge.example.workers.dev:443 fp=1111111111111111111111111111111111
     <string name="conn_orange">Ограниченное — звонки недоступны</string>
     <string name="conn_red">Нет соединения</string>
     <string name="conn_with_route">%1$s - %2$s</string>
-    <string name="conn_route_iroh_live">live iroh</string>
-    <string name="conn_route_bridge">мост</string>
-    <string name="conn_route_local_mesh">local mesh</string>
-    <string name="conn_route_mailbox">mailbox</string>
-    <string name="conn_route_offline_queue">очередь</string>
-    <string name="conn_route_relay_only_deferred">очередь relay-only</string>
-    <string name="conn_route_failed">ошибка</string>
+    <string name="conn_route_iroh_live">Прямое P2P (Iroh)</string>
+    <string name="conn_route_bridge">Защищённый мост</string>
+    <string name="conn_route_local_mesh">Офлайн-сеть Mesh (Bluetooth/Wi-Fi)</string>
+    <string name="conn_route_mailbox">Почтовый ящик (собеседник офлайн)</string>
+    <string name="conn_route_offline_queue">В очереди (офлайн)</string>
+    <string name="conn_route_relay_only_deferred">В очереди реле</string>
+    <string name="conn_route_failed">Сбой доставки</string>
 
     <string name="peer_presence_live">в live iroh</string>
     <string name="peer_presence_not_live">не в live iroh</string>
@@ -518,4 +520,32 @@ websocket ada-edge.example.workers.dev:443 fp=1111111111111111111111111111111111
     <string name="settings_auto_wipe_dialog_error">Введите 0 или положительное число дней</string>
     <string name="error_pin_wrong">Неверный PIN</string>
     <string name="error_pin_wrong_current">Неверный текущий PIN</string>
-    <string name="error_pin_no_pattern_data">Нет данных — войдите по узору</string></resources>
+    <string name="error_pin_no_pattern_data">Нет данных — войдите по узору</string>
+    <string name="chat_menu_safety_numbers">Числа безопасности</string>
+    <string name="security_sheet_title">Числа безопасности контакта</string>
+    <string name="security_sheet_subtitle">Сравните эти числа с %s или отсканируйте QR-код для подтверждения сквозного шифрования.</string>
+    <string name="security_sheet_mark_verified">Отметить контакт как проверенный</string>
+    <string name="security_sheet_verified_desc">Для проверенных контактов отображается зелёный щит. Вы получите предупреждение, если ключ собеседника изменится.</string>
+    <string name="security_sheet_copy_numbers">Скопировать числа</string>
+    <string name="security_sheet_copied">Числа безопасности скопированы в буфер обмена</string>
+    <string name="security_sheet_card_auth">Идентификация: Карточка v4 с подписью (Подлинная)</string>
+    <string name="security_sheet_card_tofu">Идентификация: Неподписанный ключ (TOFU)</string>
+    <string name="security_sheet_pq_active">Квантовая защита: Активна (ML-KEM-768)</string>
+    <string name="security_sheet_pq_classic">Квантовая защита: Классическая (X25519)</string>
+    <string name="security_sheet_safety_digits_title">Цифры безопасности (60)</string>
+    <string name="security_sheet_close">Закрыть</string>
+
+    <string name="contact_key_change_title">Ключ безопасности изменился</string>
+    <string name="contact_key_change_warning">Ключ шифрования для %s изменился. Это может означать переустановку приложения либо попытку перехвата.</string>
+    <string name="contact_key_change_verify">Сверить</string>
+    <string name="contact_key_change_accept">Принять</string>
+    <string name="contact_key_change_reject">Отклонить</string>
+
+    <string name="unknown_contact_banner_text">Собеседник отсутствует в списке ваших контактов.</string>
+    <string name="unknown_contact_action_save">В контакты</string>
+    <string name="unknown_contact_action_block">Блок</string>
+    <string name="call_self_view_label">Вы</string>
+    <string name="group_mesh_p2p_notice">Группы работают полностью децентрализованно (P2P Mesh). Лимит 16 участников гарантирует стабильность связи и экономит заряд батареи.</string>
+    <string name="chat_file_saved">Файл сохранён</string>
+    <string name="chat_file_save_failed">Не удалось сохранить файл</string>
+</resources>

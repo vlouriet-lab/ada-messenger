@@ -34,15 +34,27 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.Link
@@ -113,6 +125,7 @@ private enum class DesktopUtilityDialog {
     AddContact,
     MyQr,
     Bridge,
+    CreateGroup,
 }
 
 private enum class PinDialogMode {
@@ -164,6 +177,7 @@ fun DesktopWorkspaceScreen(
     onSaveFile: (DesktopChatMessage) -> Unit,
     onClearSendError: () -> Unit,
     onClearActionMessage: () -> Unit,
+    onCreateGroup: (String) -> Boolean = { false },
 ) {
     LaunchedEffect(state.actionMessage) {
         if (!state.actionMessage.isNullOrBlank()) {
@@ -172,17 +186,52 @@ fun DesktopWorkspaceScreen(
         }
     }
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val splitLayout = maxWidth >= 980.dp
-        var selectedSection by remember { mutableStateOf(DesktopWorkspaceSection.Chats) }
-        var searchQuery by remember { mutableStateOf("") }
-        var utilityDialog by remember { mutableStateOf<DesktopUtilityDialog?>(null) }
+    var selectedSection by remember { mutableStateOf(DesktopWorkspaceSection.Chats) }
+    var searchQuery by remember { mutableStateOf("") }
+    var utilityDialog by remember { mutableStateOf<DesktopUtilityDialog?>(null) }
+    val searchFocusRequester = remember { FocusRequester() }
 
-        LaunchedEffect(state.incomingCall?.callId) {
-            if (state.incomingCall != null) {
-                selectedSection = DesktopWorkspaceSection.Calls
-            }
+    LaunchedEffect(state.incomingCall?.callId) {
+        if (state.incomingCall != null) {
+            selectedSection = DesktopWorkspaceSection.Calls
         }
+    }
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown) {
+                    when {
+                        (event.isCtrlPressed || event.isMetaPressed) && event.key == Key.K -> {
+                            selectedSection = DesktopWorkspaceSection.Chats
+                            searchFocusRequester.requestFocus()
+                            true
+                        }
+                        (event.isCtrlPressed || event.isMetaPressed) && event.isShiftPressed && event.key == Key.A -> {
+                            onSendAttachment()
+                            true
+                        }
+                        event.key == Key.Escape -> {
+                            if (searchQuery.isNotEmpty()) {
+                                searchQuery = ""
+                                true
+                            } else if (utilityDialog != null) {
+                                utilityDialog = null
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                        else -> false
+                    }
+                } else {
+                    false
+                }
+            },
+    ) {
+        val splitLayout = maxWidth >= 980.dp
+        val threePanelLayout = maxWidth >= 1280.dp
 
         val activeConversation = remember(state.conversations, state.activeConversationId) {
             state.conversations.firstOrNull { it.id == state.activeConversationId }
@@ -215,6 +264,7 @@ fun DesktopWorkspaceScreen(
                     DesktopWorkspaceSection.Chats -> ChatWorkspaceSection(
                         state = state,
                         splitLayout = splitLayout,
+                        threePanelLayout = threePanelLayout,
                         conversations = filteredConversations,
                         searchQuery = searchQuery,
                         onSearchQueryChange = { searchQuery = it },
@@ -230,6 +280,8 @@ fun DesktopWorkspaceScreen(
                         onSendAttachment = onSendAttachment,
                         onSaveFile = onSaveFile,
                         onClearSendError = onClearSendError,
+                        onOpenUtility = { utilityDialog = it },
+                        searchFocusRequester = searchFocusRequester,
                     )
 
                     DesktopWorkspaceSection.Calls -> CallsPane(
@@ -281,6 +333,7 @@ fun DesktopWorkspaceScreen(
             onSetRelayOnly = onSetRelayOnly,
             onAddRelayNode = onAddRelayNode,
             onRefreshWorkspace = onRefreshWorkspace,
+            onCreateGroup = onCreateGroup,
         )
     }
 }
@@ -432,6 +485,7 @@ private fun WorkspaceBottomBar(
 private fun ChatWorkspaceSection(
     state: DesktopSessionUiState,
     splitLayout: Boolean,
+    threePanelLayout: Boolean,
     conversations: List<DesktopConversationItem>,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
@@ -447,38 +501,53 @@ private fun ChatWorkspaceSection(
     onSendAttachment: () -> Unit,
     onSaveFile: (DesktopChatMessage) -> Unit,
     onClearSendError: () -> Unit,
+    onOpenUtility: (DesktopUtilityDialog) -> Unit,
+    searchFocusRequester: FocusRequester,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         ConnectionStatusBar(bridgeStatus = state.bridgeStatus)
         if (splitLayout) {
-        Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            ConversationPane(
-                state = state,
-                conversations = conversations,
-                searchQuery = searchQuery,
-                onSearchQueryChange = onSearchQueryChange,
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .width(320.dp),
-                onOpenConversation = onOpenConversation,
-            )
-            HorizontalDivider(modifier = Modifier.fillMaxHeight().width(1.dp))
-            MessagePane(
-                state = state,
-                conversation = activeConversation,
-                modifier = Modifier.weight(1f),
-                onDraftChange = onDraftChange,
-                onSendDraft = onSendDraft,
-                onRenameContact = onRenameContact,
-                onDeleteMessage = onDeleteMessage,
-                onDeleteMessageForEveryone = onDeleteMessageForEveryone,
-                onStartAudioCall = onStartAudioCall,
-                onStartVideoCall = onStartVideoCall,
-                onSendAttachment = onSendAttachment,
-                onSaveFile = onSaveFile,
-                onClearSendError = onClearSendError,
-            )
-        }
+            Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                ConversationPane(
+                    state = state,
+                    conversations = conversations,
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = onSearchQueryChange,
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(320.dp),
+                    onOpenConversation = onOpenConversation,
+                    onOpenUtility = onOpenUtility,
+                    searchFocusRequester = searchFocusRequester,
+                )
+                HorizontalDivider(modifier = Modifier.fillMaxHeight().width(1.dp))
+                MessagePane(
+                    state = state,
+                    conversation = activeConversation,
+                    modifier = Modifier.weight(1f),
+                    onDraftChange = onDraftChange,
+                    onSendDraft = onSendDraft,
+                    onRenameContact = onRenameContact,
+                    onDeleteMessage = onDeleteMessage,
+                    onDeleteMessageForEveryone = onDeleteMessageForEveryone,
+                    onStartAudioCall = onStartAudioCall,
+                    onStartVideoCall = onStartVideoCall,
+                    onSendAttachment = onSendAttachment,
+                    onSaveFile = onSaveFile,
+                    onClearSendError = onClearSendError,
+                )
+                if (threePanelLayout && activeConversation != null) {
+                    HorizontalDivider(modifier = Modifier.fillMaxHeight().width(1.dp))
+                    ConversationDetailsPane(
+                        state = state,
+                        conversation = activeConversation,
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .width(320.dp),
+                        onSaveFile = onSaveFile,
+                    )
+                }
+            }
         } else {
             ConversationPane(
                 state = state,
@@ -489,6 +558,8 @@ private fun ChatWorkspaceSection(
                     .fillMaxWidth()
                     .weight(0.44f),
                 onOpenConversation = onOpenConversation,
+                onOpenUtility = onOpenUtility,
+                searchFocusRequester = searchFocusRequester,
             )
             HorizontalDivider()
             MessagePane(
@@ -520,18 +591,43 @@ private fun ConversationPane(
     onSearchQueryChange: (String) -> Unit,
     modifier: Modifier,
     onOpenConversation: (String) -> Unit,
+    onOpenUtility: (DesktopUtilityDialog) -> Unit,
+    searchFocusRequester: FocusRequester,
 ) {
     Column(modifier = modifier) {
-        Box(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             DesktopSearchField(
                 query = searchQuery,
                 onQueryChange = onSearchQueryChange,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.weight(1f),
+                focusRequester = searchFocusRequester,
             )
+            IconButton(
+                onClick = { onOpenUtility(DesktopUtilityDialog.CreateGroup) },
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Group,
+                    contentDescription = "Создать группу",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+            IconButton(
+                onClick = { onOpenUtility(DesktopUtilityDialog.AddContact) },
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Добавить контакт",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
 
@@ -571,11 +667,12 @@ private fun DesktopSearchField(
     query: String,
     onQueryChange: (String) -> Unit,
     modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null,
 ) {
     OutlinedTextField(
         value = query,
         onValueChange = onQueryChange,
-        modifier = modifier.heightIn(min = 36.dp),
+        modifier = (if (focusRequester != null) modifier.focusRequester(focusRequester) else modifier).heightIn(min = 36.dp),
         singleLine = true,
         textStyle = MaterialTheme.typography.bodyMedium,
         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
@@ -595,6 +692,145 @@ private fun DesktopSearchField(
             unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f),
         ),
     )
+}
+
+@Composable
+private fun ConversationDetailsPane(
+    state: DesktopSessionUiState,
+    conversation: DesktopConversationItem,
+    modifier: Modifier = Modifier,
+    onSaveFile: (DesktopChatMessage) -> Unit,
+) {
+    val clipboard = LocalClipboardManager.current
+    val rawId = conversation.id.removePrefix("d:").removePrefix("g:")
+    val isGroup = conversation.isGroup
+    val fileMessages = remember(state.messages) {
+        state.messages.filter { it.fileId.isNotBlank() || it.text.startsWith("Файл: ") || it.kind == "file" || it.kind == "attachment" }
+    }
+
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        InitialsAvatar(name = conversation.displayName, size = 64.dp, fontSize = 26.sp)
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text = conversation.displayName,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (isGroup) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.secondaryContainer,
+            ) {
+                Text(
+                    text = if (isGroup) "Группа P2P mesh" else "Прямой диалог E2EE",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isGroup) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+        }
+
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+        SectionCard(
+            title = if (isGroup) "Topic ID" else "Peer ID",
+            body = buildString {
+                append(rawId)
+                if (!isGroup) {
+                    append("\n\nШифрование: Post-Quantum Kyber-1024 + ChaCha20-Poly1305.")
+                    append("\nForward Secrecy: Ratchet session per-message.")
+                } else {
+                    append("\n\nТопология: P2P mesh, gossipsub без центрального сервера (до 16 пиров).")
+                }
+            },
+        )
+
+        OutlinedButton(
+            onClick = { clipboard.setText(AnnotatedString(rawId)) },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Скопировать ID")
+        }
+
+        Text(
+            text = "Вложения и файлы (${fileMessages.size})",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.align(Alignment.Start),
+        )
+
+        if (fileMessages.isEmpty()) {
+            Text(
+                text = "В этом диалоге пока нет файлов.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.align(Alignment.Start),
+            )
+        } else {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                fileMessages.takeLast(10).reversed().forEach { msg ->
+                    val fileName = msg.text.removePrefix("Файл: ").trim().ifBlank { "attachment_${msg.id.take(6)}" }
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FolderOpen,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = fileName,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                if (msg.fileSize > 0) {
+                                    Text(
+                                        text = formatFileSize(msg.fileSize),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            IconButton(
+                                onClick = { onSaveFile(msg) },
+                                modifier = Modifier.size(28.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FolderOpen,
+                                    contentDescription = "Сохранить",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -1888,6 +2124,7 @@ private fun UtilityDialog(
     onSetRelayOnly: (Boolean) -> Unit,
     onAddRelayNode: (String) -> Unit,
     onRefreshWorkspace: () -> Unit,
+    onCreateGroup: (String) -> Boolean,
 ) {
     when (dialog) {
         DesktopUtilityDialog.AddContact -> AddContactDialog(
@@ -1919,8 +2156,78 @@ private fun UtilityDialog(
             onRefreshWorkspace = onRefreshWorkspace,
         )
 
+        DesktopUtilityDialog.CreateGroup -> CreateGroupDialog(
+            onDismiss = onDismiss,
+            onCreateGroup = onCreateGroup,
+        )
+
         null -> Unit
     }
+}
+
+@Composable
+private fun CreateGroupDialog(
+    onDismiss: () -> Unit,
+    onCreateGroup: (String) -> Boolean,
+) {
+    var groupName by remember { mutableStateOf("") }
+    var localError by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val trimmed = groupName.trim()
+                    if (trimmed.isEmpty()) {
+                        localError = "Введите название группы"
+                    } else {
+                        val ok = onCreateGroup(trimmed)
+                        if (ok) {
+                            onDismiss()
+                        } else {
+                            localError = "Не удалось создать группу"
+                        }
+                    }
+                },
+            ) {
+                Text("Создать")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Отмена")
+            }
+        },
+        title = { Text("Новая группа") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 500.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = "Создание децентрализованной P2P mesh-группы (до 16 участников).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = groupName,
+                    onValueChange = {
+                        groupName = it
+                        localError = null
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Название группы") },
+                    singleLine = true,
+                )
+                if (!localError.isNullOrBlank()) {
+                    SupportStrip(text = localError!!, isError = true)
+                }
+            }
+        },
+    )
 }
 
 @Composable

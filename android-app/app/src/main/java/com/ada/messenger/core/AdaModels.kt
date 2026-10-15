@@ -250,3 +250,72 @@ fun parseCallHistory(json: String, conversations: List<ConversationItem>): List<
         emptyList()
     }
 }
+
+// ── Contact Security & Verification ──────────────────────────────────────────
+
+data class PendingKeyChange(
+    val identityKeyHex: String,
+    val ikAuthenticated: Boolean,
+    val displayName: String,
+)
+
+data class ContactSecurityInfo(
+    val peerIdB64: String,
+    val displayName: String,
+    val safetyNumber: String,
+    val safetyNumberGroups: List<String>,
+    val safetyNumberFormatted: String,
+    val identityKeyHex: String,
+    val ikAuthenticated: Boolean,
+    val isPostQuantum: Boolean,
+    val pinned: Boolean,
+    val verified: Boolean,
+    val verifiedAtMs: Long?,
+    val verifiedSafetyNumber: String?,
+    val keyChanged: Boolean,
+    val pending: PendingKeyChange?,
+)
+
+data class ContactKeyChangeEvent(
+    val peerIdB64: String,
+    val safetyNumber: String,
+    val ikAuthenticated: Boolean,
+)
+
+fun parseContactSecurity(json: String): ContactSecurityInfo? {
+    return try {
+        val o = JSONObject(json)
+        if (!o.has("peer_id")) return null
+        val groupsArr = o.optJSONArray("safety_number_groups")
+        val groups = if (groupsArr != null) {
+            (0 until groupsArr.length()).map { groupsArr.getString(it) }
+        } else emptyList()
+        val pendingObj = o.optJSONObject("pending")
+        val pending = if (pendingObj != null) {
+            PendingKeyChange(
+                identityKeyHex = pendingObj.optString("identity_key", ""),
+                ikAuthenticated = pendingObj.optBoolean("ik_authenticated", false),
+                displayName = pendingObj.optString("display_name", ""),
+            )
+        } else null
+        ContactSecurityInfo(
+            peerIdB64 = o.optString("peer_id", ""),
+            displayName = o.optString("display_name", ""),
+            safetyNumber = o.optString("safety_number", ""),
+            safetyNumberGroups = groups,
+            safetyNumberFormatted = o.optString("safety_number_formatted", ""),
+            identityKeyHex = o.optString("identity_key", ""),
+            ikAuthenticated = o.optBoolean("ik_authenticated", false),
+            isPostQuantum = o.optBoolean("is_post_quantum", false),
+            pinned = o.optBoolean("pinned", false),
+            verified = o.optBoolean("verified", false),
+            verifiedAtMs = if (o.has("verified_at_ms") && !o.isNull("verified_at_ms")) o.optLong("verified_at_ms") else null,
+            verifiedSafetyNumber = if (o.has("verified_safety_number") && !o.isNull("verified_safety_number")) o.optString("verified_safety_number") else null,
+            keyChanged = o.optBoolean("key_changed", false),
+            pending = pending,
+        )
+    } catch (e: Exception) {
+        null
+    }
+}
+

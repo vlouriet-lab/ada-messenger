@@ -113,6 +113,7 @@ class DesktopAdaCore private constructor(private val handle: Long) {
     private external fun nativeHandleSyncPush(handle: Long, linkKeyHex: String, dataB64: String): Int
     private external fun nativeSendText(handle: Long, peerIdB64: String, text: String): Int
     private external fun nativeSendGroupText(handle: Long, groupIdHex: String, text: String): Int
+    private external fun nativeCreateGroup(handle: Long, groupName: String): String?
     private external fun nativeGetConversationsJson(handle: Long): String?
     private external fun nativeSearchConversationsJson(handle: Long, query: String): String?
     private external fun nativeGetMessagesJson(handle: Long, convId: String, limit: Int): String?
@@ -158,6 +159,12 @@ class DesktopAdaCore private constructor(private val handle: Long) {
     private external fun nativeDetectCensorshipJson(handle: Long): String?
     private external fun nativeGetContactCardJson(handle: Long): String?
     private external fun nativeAddContactJson(handle: Long, contactCardJson: String): Int
+    private external fun nativeGetContactSecurityJson(handle: Long, peerIdB64: String): String?
+    private external fun nativeListContactSecurityJson(handle: Long): String?
+    private external fun nativeMarkContactVerified(handle: Long, peerIdB64: String): Int
+    private external fun nativeClearContactVerified(handle: Long, peerIdB64: String): Int
+    private external fun nativeAcceptContactKeyChange(handle: Long, peerIdB64: String): Int
+    private external fun nativeRejectContactKeyChange(handle: Long, peerIdB64: String): Int
     private external fun nativeAddRelayNode(handle: Long, relayUrl: String): Int
     private external fun nativeSetBridgeMode(handle: Long, modeStr: String): Int
     private external fun nativeSetRelayOnly(handle: Long, enabled: Int): Int
@@ -195,6 +202,9 @@ class DesktopAdaCore private constructor(private val handle: Long) {
 
     fun sendGroupText(groupIdHex: String, text: String): Boolean =
         withHandle { nativeSendGroupText(it, groupIdHex, text) == 0 } ?: false
+
+    fun createGroup(groupName: String): String? =
+        withHandle { nativeCreateGroup(it, groupName) }
 
     fun getConversationsJson(): String = withHandle { nativeGetConversationsJson(it) } ?: "[]"
 
@@ -345,6 +355,24 @@ class DesktopAdaCore private constructor(private val handle: Long) {
 
     fun addContactFromJson(contactCardJson: String): Boolean =
         withHandle { nativeAddContactJson(it, contactCardJson) == 0 } ?: false
+
+    fun getContactSecurityJson(peerIdB64: String): String =
+        withHandle { nativeGetContactSecurityJson(it, peerIdB64) } ?: "{}"
+
+    fun listContactSecurityJson(): String =
+        withHandle { nativeListContactSecurityJson(it) } ?: "[]"
+
+    fun markContactVerified(peerIdB64: String): Boolean =
+        withHandle { nativeMarkContactVerified(it, peerIdB64) == 0 } ?: false
+
+    fun clearContactVerified(peerIdB64: String): Boolean =
+        withHandle { nativeClearContactVerified(it, peerIdB64) == 0 } ?: false
+
+    fun acceptContactKeyChange(peerIdB64: String): Boolean =
+        withHandle { nativeAcceptContactKeyChange(it, peerIdB64) == 0 } ?: false
+
+    fun rejectContactKeyChange(peerIdB64: String): Boolean =
+        withHandle { nativeRejectContactKeyChange(it, peerIdB64) == 0 } ?: false
 
     fun addRelayNode(relayUrl: String): Boolean =
         withHandle { nativeAddRelayNode(it, relayUrl) == 0 } ?: false

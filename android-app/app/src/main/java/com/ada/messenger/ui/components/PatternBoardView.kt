@@ -5,6 +5,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,6 +20,8 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -104,11 +107,54 @@ fun PatternBoardView(
         label = "shake"
     )
 
+    val density = LocalDensity.current
+    val cellPx = with(density) { cellSize.toPx() }
+    val spacePx = with(density) { 3.dp.toPx() }
+    val stridePx = cellPx + spacePx
+    var lastPaintedIndex by remember { mutableStateOf<Int?>(null) }
+
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(modifier = Modifier.offset(x = shakeOffset.dp)) {
+        Box(
+            modifier = Modifier
+                .offset(x = shakeOffset.dp)
+                .then(
+                    if (!readOnly) {
+                        Modifier.pointerInput(readOnly, activeColor) {
+                            detectDragGestures(
+                                onDragStart = { offset ->
+                                    val col = (offset.x / stridePx).toInt()
+                                    val row = (offset.y / stridePx).toInt()
+                                    if (col in 0 until BOARD_SIZE && row in 0 until BOARD_SIZE) {
+                                        val idx = row * BOARD_SIZE + col
+                                        lastPaintedIndex = idx
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        onCellTap(idx)
+                                    }
+                                },
+                                onDragEnd = { lastPaintedIndex = null },
+                                onDragCancel = { lastPaintedIndex = null },
+                                onDrag = { change, _ ->
+                                    change.consume()
+                                    val pos = change.position
+                                    val col = (pos.x / stridePx).toInt()
+                                    val row = (pos.y / stridePx).toInt()
+                                    if (col in 0 until BOARD_SIZE && row in 0 until BOARD_SIZE) {
+                                        val idx = row * BOARD_SIZE + col
+                                        if (idx != lastPaintedIndex) {
+                                            lastPaintedIndex = idx
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            onCellTap(idx)
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    } else Modifier
+                )
+        ) {
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 for (row in 0 until BOARD_SIZE) {
                     Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -142,7 +188,7 @@ fun PatternBoardView(
 
         if (showCounter) {
             Spacer(Modifier.height(if (showPalette && onColorSelect != null) 6.dp else 12.dp))
-            PatternCounter(count = selectedCells.size, target = PATTERN_CUBES)
+            PatternCounter(selectedCells = selectedCells, target = PATTERN_CUBES)
         }
     }
 }
@@ -333,7 +379,8 @@ private fun PatternCell(
 // ── Counter ────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun PatternCounter(count: Int, target: Int) {
+private fun PatternCounter(selectedCells: Map<Int, Int>, target: Int) {
+    val count = selectedCells.size
     val done = count == target
     val textColor by animateColorAsState(
         targetValue = if (done) MaterialTheme.colorScheme.primary
@@ -341,12 +388,46 @@ private fun PatternCounter(count: Int, target: Int) {
         animationSpec = tween(200),
         label = "counterColor"
     )
-    Text(
-        text = "$count / $target",
-        style = MaterialTheme.typography.labelMedium.copy(
-            fontWeight = if (done) FontWeight.Bold else FontWeight.Normal,
-            letterSpacing = 1.5.sp,
-        ),
-        color = textColor,
-    )
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = "$count / $target",
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontWeight = if (done) FontWeight.Bold else FontWeight.Normal,
+                letterSpacing = 1.5.sp,
+            ),
+            color = textColor,
+        )
+
+        if (count > 0) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                for (colorIdx in 0 until PATTERN_COLORS) {
+                    val colorCount = selectedCells.values.count { it == colorIdx }
+                    if (colorCount > 0) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(getPatternColor(colorIdx))
+                            )
+                            Text(
+                                text = "$colorCount",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

@@ -558,6 +558,41 @@ class DesktopSessionController(
         importContactFromText(text)
     }
 
+    fun createGroup(name: String): Boolean {
+        val trimmed = name.trim()
+        if (trimmed.isBlank()) {
+            setActionMessage("Имя группы не может быть пустым.", isError = true)
+            return false
+        }
+        val activeCore = core
+        if (activeCore == null) {
+            setActionMessage("Desktop runtime ещё не инициализирован.", isError = true)
+            return false
+        }
+        val groupId = activeCore.createGroup(trimmed)
+        if (groupId != null) {
+            val convId = "g:$groupId"
+            val ensuredConversation = DesktopConversationItem(
+                id = convId,
+                displayName = trimmed,
+                lastMessage = "",
+                lastActivityMs = System.currentTimeMillis(),
+                unreadCount = 0,
+            )
+            scope.launch {
+                refreshFromCore(
+                    preferredConversationId = convId,
+                    ensuredConversation = ensuredConversation,
+                )
+            }
+            setActionMessage("Группа «$trimmed» успешно создана.")
+            return true
+        } else {
+            setActionMessage("Не удалось создать группу.", isError = true)
+            return false
+        }
+    }
+
     fun importBridgeManifestFromText(
         input: String,
         trustedPublicKeyHex: String? = null,

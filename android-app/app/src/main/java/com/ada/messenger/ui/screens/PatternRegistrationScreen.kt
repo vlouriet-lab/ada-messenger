@@ -194,6 +194,12 @@ fun PatternRegistrationScreen(
                     else
                         stringResource(R.string.error_pattern_mismatch_hint),
                     hintIsError = confirmMismatch,
+                    secondaryActionLabel = stringResource(R.string.pattern_register_step2_retry),
+                    onSecondaryAction = {
+                        confirmPattern = emptyMap()
+                        confirmMismatch = false
+                        step = RegStep.DRAW
+                    },
                 )
 
                 RegStep.NICKNAME -> NicknameStep(

@@ -220,6 +220,16 @@ pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nati
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativeCreateGroup(
+    env: JNIEnv,
+    obj: JObject,
+    handle: jlong,
+    group_name: JString,
+) -> jstring {
+    Java_com_ada_messenger_core_AdaCore_nativeCreateGroup(env, obj, handle, group_name)
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativeGetConversationsJson(
     env: JNIEnv,
     obj: JObject,
@@ -614,6 +624,65 @@ pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nati
     contact_card_json: JString,
 ) -> jint {
     Java_com_ada_messenger_core_AdaCore_nativeAddContactJson(env, obj, handle, contact_card_json)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativeGetContactSecurityJson(
+    env: JNIEnv,
+    obj: JObject,
+    handle: jlong,
+    peer_id_b64: JString,
+) -> jstring {
+    Java_com_ada_messenger_core_AdaCore_nativeGetContactSecurityJson(env, obj, handle, peer_id_b64)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativeListContactSecurityJson(
+    env: JNIEnv,
+    obj: JObject,
+    handle: jlong,
+) -> jstring {
+    Java_com_ada_messenger_core_AdaCore_nativeListContactSecurityJson(env, obj, handle)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativeMarkContactVerified(
+    env: JNIEnv,
+    obj: JObject,
+    handle: jlong,
+    peer_id_b64: JString,
+) -> jint {
+    Java_com_ada_messenger_core_AdaCore_nativeMarkContactVerified(env, obj, handle, peer_id_b64)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativeClearContactVerified(
+    env: JNIEnv,
+    obj: JObject,
+    handle: jlong,
+    peer_id_b64: JString,
+) -> jint {
+    Java_com_ada_messenger_core_AdaCore_nativeClearContactVerified(env, obj, handle, peer_id_b64)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativeAcceptContactKeyChange(
+    env: JNIEnv,
+    obj: JObject,
+    handle: jlong,
+    peer_id_b64: JString,
+) -> jint {
+    Java_com_ada_messenger_core_AdaCore_nativeAcceptContactKeyChange(env, obj, handle, peer_id_b64)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativeRejectContactKeyChange(
+    env: JNIEnv,
+    obj: JObject,
+    handle: jlong,
+    peer_id_b64: JString,
+) -> jint {
+    Java_com_ada_messenger_core_AdaCore_nativeRejectContactKeyChange(env, obj, handle, peer_id_b64)
 }
 
 #[no_mangle]
@@ -2799,6 +2868,162 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeAddContactJso
         tracing::error!("[jni] nativeAddContactJson panicked");
         1
     })
+}
+
+/// Retrieve security and verification details for a contact as JSON.
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetContactSecurityJson(
+    mut env: JNIEnv,
+    _obj: JObject,
+    handle: jlong,
+    peer_id_b64: JString,
+) -> jstring {
+    let peer_str: String = match env.get_string(&peer_id_b64) {
+        Ok(s) => s.into(),
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let peer_c = match CString::new(peer_str) {
+        Ok(s) => s,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let ptr = crate::ffi::ada_get_contact_security_json(
+        handle as *const AdaCoreHandle,
+        peer_c.as_ptr(),
+    );
+    if ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+    let s = CStr::from_ptr(ptr).to_str().unwrap_or("{}");
+    let j = env
+        .new_string(s)
+        .map(|s| s.into_raw())
+        .unwrap_or(std::ptr::null_mut());
+    crate::ffi::ada_string_free(ptr);
+    j
+}
+
+/// Retrieve security and verification details for all contacts as JSON array.
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeListContactSecurityJson(
+    mut env: JNIEnv,
+    _obj: JObject,
+    handle: jlong,
+) -> jstring {
+    let ptr = crate::ffi::ada_list_contact_security_json(handle as *const AdaCoreHandle);
+    if ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+    let s = CStr::from_ptr(ptr).to_str().unwrap_or("[]");
+    let j = env
+        .new_string(s)
+        .map(|s| s.into_raw())
+        .unwrap_or(std::ptr::null_mut());
+    crate::ffi::ada_string_free(ptr);
+    j
+}
+
+/// Mark a contact as verified by safety number out-of-band.
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeMarkContactVerified(
+    mut env: JNIEnv,
+    _obj: JObject,
+    handle: jlong,
+    peer_id_b64: JString,
+) -> jint {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let peer_str: String = match env.get_string(&peer_id_b64) {
+            Ok(s) => s.into(),
+            Err(_) => return 1,
+        };
+        let peer_c = match CString::new(peer_str) {
+            Ok(s) => s,
+            Err(_) => return 1,
+        };
+        let res = crate::ffi::ada_mark_contact_verified(
+            handle as *const AdaCoreHandle,
+            peer_c.as_ptr(),
+        );
+        matches!(res, crate::ffi::AdaResult::Ok) as jint ^ 1
+    }))
+    .unwrap_or(1)
+}
+
+/// Clear safety number verification for a contact.
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeClearContactVerified(
+    mut env: JNIEnv,
+    _obj: JObject,
+    handle: jlong,
+    peer_id_b64: JString,
+) -> jint {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let peer_str: String = match env.get_string(&peer_id_b64) {
+            Ok(s) => s.into(),
+            Err(_) => return 1,
+        };
+        let peer_c = match CString::new(peer_str) {
+            Ok(s) => s,
+            Err(_) => return 1,
+        };
+        let res = crate::ffi::ada_clear_contact_verified(
+            handle as *const AdaCoreHandle,
+            peer_c.as_ptr(),
+        );
+        matches!(res, crate::ffi::AdaResult::Ok) as jint ^ 1
+    }))
+    .unwrap_or(1)
+}
+
+/// Accept a pending identity key change for a contact.
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeAcceptContactKeyChange(
+    mut env: JNIEnv,
+    _obj: JObject,
+    handle: jlong,
+    peer_id_b64: JString,
+) -> jint {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let peer_str: String = match env.get_string(&peer_id_b64) {
+            Ok(s) => s.into(),
+            Err(_) => return 1,
+        };
+        let peer_c = match CString::new(peer_str) {
+            Ok(s) => s,
+            Err(_) => return 1,
+        };
+        let res = crate::ffi::ada_accept_contact_key_change(
+            handle as *const AdaCoreHandle,
+            peer_c.as_ptr(),
+        );
+        matches!(res, crate::ffi::AdaResult::Ok) as jint ^ 1
+    }))
+    .unwrap_or(1)
+}
+
+/// Reject a pending identity key change for a contact.
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeRejectContactKeyChange(
+    mut env: JNIEnv,
+    _obj: JObject,
+    handle: jlong,
+    peer_id_b64: JString,
+) -> jint {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let peer_str: String = match env.get_string(&peer_id_b64) {
+            Ok(s) => s.into(),
+            Err(_) => return 1,
+        };
+        let peer_c = match CString::new(peer_str) {
+            Ok(s) => s,
+            Err(_) => return 1,
+        };
+        let res = crate::ffi::ada_reject_contact_key_change(
+            handle as *const AdaCoreHandle,
+            peer_c.as_ptr(),
+        );
+        matches!(res, crate::ffi::AdaResult::Ok) as jint ^ 1
+    }))
+    .unwrap_or(1)
 }
 
 /// Add a custom iroh relay node at runtime.
