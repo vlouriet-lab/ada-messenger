@@ -253,7 +253,10 @@ iroh  ──→ unicast:   DM · звонки · передача файлов
 | 7.14 | `probe_bridge()` — диспетчеризация по протоколу | `bridge/bridge.rs` | ✅ |
 | 7.15 | `probe_bridges()` + `connect_via_best_transport()` | `bridge/bridge.rs` | ✅ |
 
-**Актуальный operational статус:** relay_only, WebSocket TLS bridge, mailbox delivery, status JSON and hostile-network tests are functional. `obfs4`, `domain_fronting` and `meek` are implemented transport options, but remain canary/field-validation routes; ADA `obfs4` is a lightweight authenticated obfuscator, not full Tor obfs4.
+**Актуальный operational статус:** 
+- Прямой P2P-стек Iroh (QUIC, STUN, NAT hole-punching, pkarr DNS discovery) полностью автономен и проверен в реальных условиях: текстовые сообщения 1:1, gossip-группы и WebRTC-звонки работают без необходимости развертывания выделенных серверов (включая работу в РФ без VPN).
+- Код `cf-workers/` (серверлесс Mailbox на Durable Objects SQLite + WebSocket-прокси + раздатчик манифестов) полностью готов и находится в режиме ожидания (Cold Standby). Физический деплой запланирован при переходе к публичному масштабированию (для асинхронной доставки оффлайн-сообщений) или при эскалации блокировок Iroh QUIC/n0 цензурными органами.
+- `obfs4`, `domain_fronting` и `meek` остаются реализованными canary-маршрутами обхода для экстремальных сценариев.
 
 ---
 

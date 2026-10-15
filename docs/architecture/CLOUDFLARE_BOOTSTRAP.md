@@ -1,5 +1,17 @@
 # Cloudflare Bootstrap
 
+## Current Operational Status: Standby & Field Reality
+
+> [!NOTE]
+> **Автономия P2P и статус развёртывания:**
+> В настоящее время мессенджер ADA **не требует наличия развернутых Cloudflare Workers или собственных VPS-нод** для полноценной работы.
+> 
+> * **Полевые испытания (включая РФ):** Прямой P2P-стек Iroh (QUIC, STUN, NAT hole-punching, pkarr DNS discovery) обеспечивает стабильную доставку текстовых сообщений 1:1, масштабируемый gossip в группах и сквозные WebRTC аудио/видео звонки даже в условиях жестких сетевых фильтров и цензуры (включая РФ) без использования VPN.
+> * **Статус воркеров (Cold Standby):** Код в папке `cf-workers/` (`serverless-bridge-worker`, `ws-bridge-worker`, `manifest-worker`) на 100% написан, протестирован и находится в состоянии «горячего резерва».
+> * **Триггеры для физического развёртывания:**
+>   1. **Масштабирование оффлайн-доставки (Mailbox):** Когда потребуется гарантированная доставка сообщений адресатам, чьи устройства глубоко спят или выключены часами/днями (асинхронная очередь на Durable Objects SQLite).
+>   2. **Эскалация цензуры (Блокировка QUIC/n0):** Если регуляторы начнут точечно глушить протокол Iroh QUIC или блокировать стандартные discovery-домены, развертывание Cloudflare Workers мгновенно активирует камуфляжный щит (Domain Fronting / WebSocket TLS over Anycast CDN).
+
 ## Goal
 
 Support Cloudflare as an optional bring-your-own bootstrap lane for allowlist and aggressive censorship networks. ADA can import a signed bridge manifest over normal HTTPS, and that manifest can point at Cloudflare Worker/custom-domain bridge endpoints that expose `/ada`, `/mailbox/push`, `/mailbox/pull`, and `/mailbox/ack`.
