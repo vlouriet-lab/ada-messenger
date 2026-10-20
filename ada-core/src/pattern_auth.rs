@@ -29,7 +29,6 @@ use crate::error::{ADAError, Result};
 use crate::identity::{Identity, IdentityExport};
 use argon2::{Argon2, Params as Argon2Params, Version as Argon2Version};
 use hkdf::Hkdf;
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 

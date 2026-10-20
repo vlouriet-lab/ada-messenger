@@ -111,18 +111,12 @@ fn default_manifest_bridge_active() -> bool {
 }
 
 impl SignedBridgeManifest {
-    pub fn verify(&self, trusted_public_keys: &[[u8; 32]]) -> Result<BridgeManifestPayload> {
-        Ok(self.verify_with_publisher(trusted_public_keys)?.payload)
-    }
-
-    /// Verify the signature and report which trusted key signed the manifest.
-    pub fn verify_with_publisher(
-        &self,
-        trusted_public_keys: &[[u8; 32]],
-    ) -> Result<VerifiedBridgeManifest> {
-        if trusted_public_keys.is_empty() {
+    /// Verify that the signature was made by one of the trusted root anchors,
+    /// returning the matching anchor without parsing payload.
+    pub fn verify_signature(&self, trusted_anchors: &[[u8; 32]]) -> Result<[u8; 32]> {
+        if trusted_anchors.is_empty() {
             return Err(ADAError::Bridge(
-                "no trusted manifest public keys configured".into(),
+                "no trusted manifest anchors configured".into(),
             ));
         }
 
@@ -134,20 +128,38 @@ impl SignedBridgeManifest {
         let signature = Signature::from_bytes(&sig_arr);
 
         let payload_bytes = self.payload_json.as_bytes();
-        let mut publisher_key: Option<[u8; 32]> = None;
-        for key_bytes in trusted_public_keys {
-            let key = VerifyingKey::from_bytes(key_bytes)
-                .map_err(|_| ADAError::Bridge("invalid trusted manifest public key".into()))?;
+        let mut matching_anchor: Option<[u8; 32]> = None;
+        for anchor_bytes in trusted_anchors {
+            let key = VerifyingKey::from_bytes(anchor_bytes)
+                .map_err(|_| ADAError::Bridge("invalid trusted manifest anchor".into()))?;
             if key.verify(payload_bytes, &signature).is_ok() {
-                publisher_key = Some(*key_bytes);
+                matching_anchor = Some(*anchor_bytes);
                 break;
             }
         }
-        let publisher_key = publisher_key.ok_or(ADAError::InvalidSignature)?;
+        matching_anchor.ok_or(ADAError::InvalidSignature)
+    }
 
+    /// Parse and validate the manifest payload independently from signature verification.
+    pub fn parse_payload(&self) -> Result<BridgeManifestPayload> {
         let payload: BridgeManifestPayload =
             serde_json::from_str(&self.payload_json).map_err(ADAError::Json)?;
         payload.validate()?;
+        Ok(payload)
+    }
+
+    pub fn verify(&self, trusted_anchors: &[[u8; 32]]) -> Result<BridgeManifestPayload> {
+        self.verify_signature(trusted_anchors)?;
+        self.parse_payload()
+    }
+
+    /// Verify the signature and report which trusted key signed the manifest.
+    pub fn verify_with_publisher(
+        &self,
+        trusted_anchors: &[[u8; 32]],
+    ) -> Result<VerifiedBridgeManifest> {
+        let publisher_key = self.verify_signature(trusted_anchors)?;
+        let payload = self.parse_payload()?;
         Ok(VerifiedBridgeManifest {
             payload,
             publisher_key,

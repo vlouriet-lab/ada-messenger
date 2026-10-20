@@ -6,7 +6,7 @@
 //! When a member leaves, all remaining members rotate their keys.
 
 use crate::crypto::symmetric::{
-    decrypt, encrypt, generate_key, hkdf_derive, hkdf_derive_32, EncryptedData,
+    decrypt, encrypt, generate_key, hkdf_derive_32, EncryptedData,
 };
 use crate::error::{ADAError, Result};
 use crate::identity::PeerId;

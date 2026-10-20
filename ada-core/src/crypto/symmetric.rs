@@ -4,7 +4,7 @@ use aes_gcm::{
     Aes256Gcm, Key, Nonce,
 };
 use hkdf::Hkdf;
-use rand::{Rng, RngCore};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
@@ -81,7 +81,7 @@ pub fn hkdf_derive(salt: &[u8], ikm: Option<&[u8]>, info: &[u8], output: &mut [u
 }
 
 pub fn hkdf_derive_32(salt: &[u8], ikm: Option<&[u8]>, info: &[u8]) -> [u8; 32] {
-    let mut output = [0u8; 32];
+    let mut output: [u8; 32] = rand::rngs::OsRng.gen();
     hkdf_derive(salt, ikm, info, &mut output);
     output
 }

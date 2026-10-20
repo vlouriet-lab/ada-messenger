@@ -4,12 +4,12 @@ use ada_core::bridge::manifest::SignedBridgeManifest;
 use anyhow::{anyhow, Context};
 
 fn usage() -> ! {
-    eprintln!("Usage: verify_manifest <signed-manifest.json> [public-key-hex[,public-key-hex...]]");
-    eprintln!("Environment fallback: ADA_BUILTIN_MANIFEST_PUBLIC_KEYS=<32-byte hex key list>");
+    eprintln!("Usage: verify_manifest <signed-manifest.json> [anchor-hex[,anchor-hex...]]");
+    eprintln!("Environment fallback: ADA_BUILTIN_MANIFEST_PUBLIC_KEYS or ADA_BUILTIN_MANIFEST_ANCHORS");
     std::process::exit(2);
 }
 
-fn split_key_values(raw: &str) -> impl Iterator<Item = &str> {
+fn split_delimited_values(raw: &str) -> impl Iterator<Item = &str> {
     raw.split(|ch: char| ch == ',' || ch == ';' || ch.is_whitespace())
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -17,7 +17,7 @@ fn split_key_values(raw: &str) -> impl Iterator<Item = &str> {
 
 fn decode_signing_anchors(raw: &str) -> anyhow::Result<Vec<[u8; 32]>> {
     let mut anchors = Vec::new();
-    for item in split_key_values(raw) {
+    for item in split_delimited_values(raw) {
         let bytes = hex::decode(item.replace(':', ""))
             .with_context(|| format!("manifest signing anchor is not valid hex: {item}"))?;
         let anchor_bytes: [u8; 32] = bytes
@@ -39,8 +39,9 @@ fn main() -> anyhow::Result<()> {
     };
     let anchors_raw = match args.next() {
         Some(value) => value.to_string_lossy().to_string(),
-        None => env::var("ADA_BUILTIN_MANIFEST_PUBLIC_KEYS")
-            .context("public keys argument missing and ADA_BUILTIN_MANIFEST_PUBLIC_KEYS is not set")?,
+        None => env::var("ADA_BUILTIN_MANIFEST_ANCHORS")
+            .or_else(|_| env::var("ADA_BUILTIN_MANIFEST_PUBLIC_KEYS"))
+            .context("anchors argument missing and ADA_BUILTIN_MANIFEST_PUBLIC_KEYS is not set")?,
     };
     if args.next().is_some() {
         usage();
@@ -51,13 +52,14 @@ fn main() -> anyhow::Result<()> {
     let signed_manifest: SignedBridgeManifest = serde_json::from_str(manifest_json.trim_start_matches('\u{feff}'))
         .with_context(|| format!("failed to parse {}", input_path.display()))?;
     let trusted_anchors = decode_signing_anchors(&anchors_raw)?;
-    let manifest_payload = signed_manifest.verify(&trusted_anchors)?;
+    signed_manifest.verify_signature(&trusted_anchors)?;
+    let manifest_payload = signed_manifest.parse_payload()?;
 
     println!("manifest verified");
     println!("version: {}", manifest_payload.version);
     println!("ttl_secs: {}", manifest_payload.ttl_secs);
     println!("bridge count: {}", manifest_payload.bridges.len());
-    for bridge in manifest_payload.bridges {
+    for bridge in &manifest_payload.bridges {
         println!(
             "bridge: id={} protocol={} host={} port={} priority={} active={}",
             bridge.id,

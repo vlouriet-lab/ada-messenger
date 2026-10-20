@@ -12,7 +12,7 @@
 //! - Break-in recovery: new DH ratchet steps restore security after compromise
 //! - Out-of-order message tolerance: skipped message keys are stored up to MAX_SKIP
 
-use crate::crypto::symmetric::{decrypt, encrypt, hkdf_derive, EncryptedData};
+use crate::crypto::symmetric::{decrypt, encrypt, EncryptedData};
 use crate::error::{ADAError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

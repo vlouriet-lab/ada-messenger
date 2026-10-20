@@ -313,9 +313,10 @@ fn derive_ks(seed: &[u8], n: usize) -> Vec<u8> {
     // then use ChaCha20 keystream to produce `n` bytes.
     // Replaces the previous SHA-256 counter-mode construction.
     use hkdf::Hkdf;
+    use rand::Rng;
     use sha2::Sha256;
     let hk = Hkdf::<Sha256>::new(None, seed);
-    let mut key_buf = vec![0u8; 32];
+    let mut key_buf: [u8; 32] = rand::rngs::OsRng.gen();
     let _ = hk.expand(b"ada/obfs/ks-v2", &mut key_buf);
     let cipher_key = ChaChaKey::from_slice(&key_buf);
     let nonce = ChaChaNonce::default(); // 12 zero bytes — key is session-unique

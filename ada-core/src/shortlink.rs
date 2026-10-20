@@ -27,7 +27,7 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chacha20poly1305::aead::Aead;
 use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
-use rand::{Rng, RngCore};
+use rand::Rng;
 
 // ── Compile-time symmetric key ────────────────────────────────────────────────
 
