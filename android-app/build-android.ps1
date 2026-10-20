@@ -19,6 +19,16 @@ param (
 
 $ErrorActionPreference = "Stop"
 
+if (-not $env:ANDROID_HOME) { $env:ANDROID_HOME = "C:\Android\Sdk" }
+if (-not $env:ANDROID_NDK_HOME) { $env:ANDROID_NDK_HOME = "C:\Android\Sdk\ndk\28.0.13004108" }
+$env:NDK_HOME = $env:ANDROID_NDK_HOME
+$env:ANDROID_NDK = $env:ANDROID_NDK_HOME
+
+$AndroidCmakeBin = Join-Path $env:ANDROID_HOME "cmake\3.22.1\bin"
+if (Test-Path $AndroidCmakeBin) {
+    $env:PATH = "$AndroidCmakeBin;$env:PATH"
+}
+
 $BuildProfile  = if ($Release) { "release" } else { "debug" }
 $CargoFlag = if ($Release) { "--release" } else { "" }
 # Default: arm64-v8a only (covers ~95% of Android devices, keeps APK small).

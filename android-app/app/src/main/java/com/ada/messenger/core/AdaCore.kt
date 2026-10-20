@@ -235,6 +235,50 @@ class AdaCore private constructor(private val handle: Long) {
     fun meshPeerDisconnected(peerB64: String): Boolean =
         withHandle { nativeMeshPeerDisconnected(it, peerB64) == 0 } ?: false
 
+    // ── Off-Grid Radio Mesh Integration ────────────────────────────────────
+    private external fun nativeMeshRadioProcessFrame(
+        handle: Long,
+        bytes: ByteArray,
+        transportKind: Int,
+        hwAddr: String,
+        rssiDbm: Int
+    ): ByteArray?
+
+    private external fun nativeMeshRadioGenerateBeacon(handle: Long): ByteArray?
+
+    private external fun nativeMeshRadioRegisterPeer(handle: Long, peerB64: String): Int
+
+    private external fun nativeMeshRadioUpdateMetrics(
+        handle: Long,
+        peerB64: String,
+        transportKind: Int,
+        hwAddr: String,
+        rssiDbm: Int
+    ): Int
+
+    private external fun nativeMeshRadioPrepareFrames(
+        handle: Long,
+        peerB64: String,
+        wireBytes: ByteArray,
+        transportKind: Int,
+        requiresAck: Boolean
+    ): Array<ByteArray>?
+
+    fun meshRadioProcessFrame(bytes: ByteArray, transportKind: Int, hwAddr: String = "00:00:00:00:00:00", rssiDbm: Int = -70): ByteArray? =
+        withHandle { nativeMeshRadioProcessFrame(it, bytes, transportKind, hwAddr, rssiDbm) }
+
+    fun meshRadioGenerateBeacon(): ByteArray? =
+        withHandle { nativeMeshRadioGenerateBeacon(it) }
+
+    fun meshRadioRegisterPeer(peerB64: String): Int =
+        withHandle { nativeMeshRadioRegisterPeer(it, peerB64) } ?: 0
+
+    fun meshRadioUpdateMetrics(peerB64: String, transportKind: Int, hwAddr: String, rssiDbm: Int): Boolean =
+        withHandle { nativeMeshRadioUpdateMetrics(it, peerB64, transportKind, hwAddr, rssiDbm) == 0 } ?: false
+
+    fun meshRadioPrepareFrames(peerB64: String, wireBytes: ByteArray, transportKind: Int = 1, requiresAck: Boolean = true): List<ByteArray> =
+        withHandle { nativeMeshRadioPrepareFrames(it, peerB64, wireBytes, transportKind, requiresAck) }?.toList() ?: emptyList()
+
     // ── Calls ──────────────────────────────────────────────────────────────
     /** Returns call-id hex string or null on error. */
     private external fun nativeCallAudio(handle: Long, peerIdB64: String, offerSdp: String): String?

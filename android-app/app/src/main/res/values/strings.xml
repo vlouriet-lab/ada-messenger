@@ -495,6 +495,29 @@
     <!-- Settings -->
     <string name="settings_section_communication">Communication</string>
     <string name="settings_mesh_subtitle">Direct P2P via Bluetooth and Wi-Fi Direct without servers</string>
+    <string name="settings_mesh_diagnostics_title">Radio mesh parameters &amp; diagnostics</string>
+    <string name="settings_mesh_diagnostics_subtitle_active">Active • %1$d peers in radio range</string>
+    <string name="settings_mesh_diagnostics_subtitle_idle">Hardware capabilities and radio tuning</string>
+    <string name="settings_mesh_dialog_title">Off-Grid Radio Mesh</string>
+    <string name="settings_mesh_status_header">Air Status</string>
+    <string name="settings_mesh_status_active">Mesh radio engine active</string>
+    <string name="settings_mesh_status_idle">Mesh radio engine standby</string>
+    <string name="settings_mesh_peers_summary">Peers in range: %1$d (BLE: %2$d, Wi-Fi Aware: %3$d, P2P: %4$d)</string>
+    <string name="settings_mesh_hardware_header">Hardware Capabilities</string>
+    <string name="settings_mesh_cap_ble_coded">BLE Long Range (Coded PHY S=8)</string>
+    <string name="settings_mesh_cap_l2cap">L2CAP Connection Channels</string>
+    <string name="settings_mesh_cap_wifi_aware">Wi-Fi Aware (NAN P2P)</string>
+    <string name="settings_mesh_cap_wifi_direct">Wi-Fi Direct</string>
+    <string name="settings_mesh_cap_sidelink">5G Sidelink / Direct (PC5)</string>
+    <string name="settings_mesh_cap_supported">Supported</string>
+    <string name="settings_mesh_cap_unsupported">Not supported</string>
+    <string name="settings_mesh_preferences_header">Radio Tuning</string>
+    <string name="settings_mesh_pref_coded_phy">BLE Coded PHY (Max Range up to 800m)</string>
+    <string name="settings_mesh_pref_coded_phy_desc">Uses error-correcting codes to extend range at 125 kbps</string>
+    <string name="settings_mesh_pref_wifi_aware">Wi-Fi Aware (NAN High Speed)</string>
+    <string name="settings_mesh_pref_wifi_aware_desc">Direct high-speed transfer without disconnecting from Wi-Fi router</string>
+    <string name="settings_mesh_pref_dtn_relay">DTN Store-and-Forward Relay</string>
+    <string name="settings_mesh_pref_dtn_relay_desc">Relay encrypted transit messages to nearby nodes while off-grid</string>
     <string name="settings_custom_bootstrap">Custom bridge bootstrap</string>
     <string name="settings_custom_bootstrap_desc">Add your own bridge manifest URL and trusted public key.</string>
     <string name="settings_custom_bootstrap_configured">Manifest: %1$s</string>

@@ -4,6 +4,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.clickable
@@ -99,6 +100,9 @@ fun SettingsScreen(
     // Connectivity — persisted across settings screen open/close
     val meshPrefs = remember { context.getSharedPreferences("ada_mesh", android.content.Context.MODE_PRIVATE) }
     var meshEnabled by remember { mutableStateOf(meshPrefs.getBoolean("mesh_enabled", false)) }
+    val localMeshManager = remember { LocalMeshManager.getInstance(context, viewModel.core) }
+    var meshRadioStatus by remember { mutableStateOf(localMeshManager.getStatus()) }
+    var showRadioMeshDialog by remember { mutableStateOf(false) }
     val bootstrapPrefs = remember { context.getSharedPreferences(AdaConfig.BOOTSTRAP_PREFS, android.content.Context.MODE_PRIVATE) }
     var customManifestUrl by remember { mutableStateOf(bootstrapPrefs.getString(AdaConfig.KEY_CUSTOM_MANIFEST_URL, "").orEmpty()) }
     var customManifestPublicKey by remember { mutableStateOf(bootstrapPrefs.getString(AdaConfig.KEY_CUSTOM_MANIFEST_PUBLIC_KEY, "").orEmpty()) }
@@ -168,11 +172,12 @@ fun SettingsScreen(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
         val allGranted = results.values.all { it }
-        val meshMgr = LocalMeshManager.getInstance(context, viewModel.core)
+        val meshMgr = localMeshManager
         if (allGranted) {
             meshEnabled = true
             meshPrefs.edit().putBoolean("mesh_enabled", true).apply()
             meshMgr.start()
+            meshRadioStatus = meshMgr.getStatus()
             scope.launch {
                 val p2pOn = meshMgr.isWifiDirectActive
                 val btOn = try {
@@ -349,16 +354,25 @@ fun SettingsScreen(
             SettingsRow(
                 icon    = { Icon(Icons.Outlined.Bluetooth, contentDescription = null) },
                 title   = "Off-Grid Mesh Mode",
-                subtitle = stringResource(R.string.settings_mesh_subtitle),
+                subtitle = if (meshEnabled) {
+                    if (meshRadioStatus.totalPeerCount > 0) {
+                        stringResource(R.string.settings_mesh_diagnostics_subtitle_active, meshRadioStatus.totalPeerCount)
+                    } else {
+                        stringResource(R.string.settings_mesh_status_active)
+                    }
+                } else {
+                    stringResource(R.string.settings_mesh_subtitle)
+                },
                 trailing = {
                     Switch(
                         checked = meshEnabled,
                         onCheckedChange = { isChecked ->
-                            val meshMgr = LocalMeshManager.getInstance(context, viewModel.core)
+                            val meshMgr = localMeshManager
                             if (!isChecked) {
                                 meshEnabled = false
                                 meshPrefs.edit().putBoolean("mesh_enabled", false).apply()
                                 meshMgr.stop()
+                                meshRadioStatus = meshMgr.getStatus()
                             } else {
                                 val missing = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
                                     listOf(
@@ -373,6 +387,7 @@ fun SettingsScreen(
                                     meshEnabled = true
                                     meshPrefs.edit().putBoolean("mesh_enabled", true).apply()
                                     meshMgr.start()
+                                    meshRadioStatus = meshMgr.getStatus()
                                     scope.launch {
                                         val p2pOn = meshMgr.isWifiDirectActive
                                         val btOn = try {
@@ -391,11 +406,12 @@ fun SettingsScreen(
                     )
                 },
                 onClick = {
-                    val meshMgr = LocalMeshManager.getInstance(context, viewModel.core)
+                    val meshMgr = localMeshManager
                     if (meshEnabled) {
                         meshEnabled = false
                         meshPrefs.edit().putBoolean("mesh_enabled", false).apply()
                         meshMgr.stop()
+                        meshRadioStatus = meshMgr.getStatus()
                     } else {
                         val missing = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
                             listOf(
@@ -410,6 +426,7 @@ fun SettingsScreen(
                             meshEnabled = true
                             meshPrefs.edit().putBoolean("mesh_enabled", true).apply()
                             meshMgr.start()
+                            meshRadioStatus = meshMgr.getStatus()
                             scope.launch {
                                 val p2pOn = meshMgr.isWifiDirectActive
                                 val btOn = try {
@@ -424,6 +441,27 @@ fun SettingsScreen(
                             }
                         }
                     }
+                },
+            )
+
+            SettingsRow(
+                icon = { Icon(Icons.Outlined.Tune, contentDescription = null) },
+                title = stringResource(R.string.settings_mesh_diagnostics_title),
+                subtitle = if (meshEnabled) {
+                    stringResource(R.string.settings_mesh_diagnostics_subtitle_active, meshRadioStatus.totalPeerCount)
+                } else {
+                    stringResource(R.string.settings_mesh_diagnostics_subtitle_idle)
+                },
+                trailing = {
+                    Icon(
+                        Icons.Outlined.ChevronRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                onClick = {
+                    meshRadioStatus = localMeshManager.getStatus()
+                    showRadioMeshDialog = true
                 },
             )
 
@@ -1001,6 +1039,17 @@ fun SettingsScreen(
         )
     }
 
+    if (showRadioMeshDialog) {
+        RadioMeshSettingsDialog(
+            meshManager = localMeshManager,
+            isMeshRunning = meshEnabled,
+            onDismiss = {
+                showRadioMeshDialog = false
+                meshRadioStatus = localMeshManager.getStatus()
+            },
+        )
+    }
+
     if (showCustomBootstrapDialog) {
         var dialogManifestUrl by remember(customManifestUrl) { mutableStateOf(customManifestUrl) }
         var dialogPublicKey by remember(customManifestPublicKey) { mutableStateOf(customManifestPublicKey) }
@@ -1567,3 +1616,241 @@ private fun ExtraPinDialog(
         shape = MaterialTheme.shapes.medium,
     )
 }
+
+@Composable
+fun RadioMeshSettingsDialog(
+    meshManager: LocalMeshManager,
+    isMeshRunning: Boolean,
+    onDismiss: () -> Unit,
+) {
+    var status by remember { mutableStateOf(meshManager.getStatus()) }
+    var codedPhyPref by remember { mutableStateOf(meshManager.isCodedPhyEnabled) }
+    var wifiAwarePref by remember { mutableStateOf(meshManager.isWifiAwareEnabled) }
+    var dtnRelayPref by remember { mutableStateOf(meshManager.isDtnRelayEnabled) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            status = meshManager.getStatus()
+            kotlinx.coroutines.delay(1500)
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Outlined.Tune,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+                Text(
+                    text = stringResource(R.string.settings_mesh_dialog_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                // 1. Статус радиоэфира
+                Surface(
+                    color = if (isMeshRunning) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .background(
+                                        color = if (isMeshRunning) Color(0xFF4CAF50) else Color.Gray,
+                                        shape = RoundedCornerShape(5.dp),
+                                    ),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = if (isMeshRunning) stringResource(R.string.settings_mesh_status_active)
+                                       else stringResource(R.string.settings_mesh_status_idle),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                        if (isMeshRunning) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = stringResource(
+                                    R.string.settings_mesh_peers_summary,
+                                    status.totalPeerCount,
+                                    status.blePeerCount,
+                                    status.wifiAwarePeerCount,
+                                    status.wifiDirectPeerCount,
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (status.capabilities.detectedSidelinkInterface != null) {
+                                Text(
+                                    text = "5G Sidelink / Direct: ${status.capabilities.detectedSidelinkInterface}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 2. Аппаратные возможности чипсетов
+                Text(
+                    text = stringResource(R.string.settings_mesh_hardware_header),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                )
+
+                CapabilityItem(
+                    label = stringResource(R.string.settings_mesh_cap_ble_coded),
+                    supported = status.capabilities.isBleCodedPhySupported,
+                )
+                CapabilityItem(
+                    label = stringResource(R.string.settings_mesh_cap_l2cap),
+                    supported = status.capabilities.isL2capCoCSupported,
+                )
+                CapabilityItem(
+                    label = stringResource(R.string.settings_mesh_cap_wifi_aware),
+                    supported = status.capabilities.isWifiAwareSupported,
+                )
+                CapabilityItem(
+                    label = stringResource(R.string.settings_mesh_cap_wifi_direct),
+                    supported = status.capabilities.isWifiDirectSupported,
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                // 3. Тонкие настройки радиоканалов
+                Text(
+                    text = stringResource(R.string.settings_mesh_preferences_header),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                )
+
+                RadioPreferenceRow(
+                    title = stringResource(R.string.settings_mesh_pref_coded_phy),
+                    desc = stringResource(R.string.settings_mesh_pref_coded_phy_desc),
+                    checked = codedPhyPref,
+                    enabled = status.capabilities.isBleCodedPhySupported,
+                    onCheckedChange = {
+                        codedPhyPref = it
+                        meshManager.setCodedPhyEnabled(it)
+                    },
+                )
+
+                RadioPreferenceRow(
+                    title = stringResource(R.string.settings_mesh_pref_wifi_aware),
+                    desc = stringResource(R.string.settings_mesh_pref_wifi_aware_desc),
+                    checked = wifiAwarePref,
+                    enabled = status.capabilities.isWifiAwareSupported,
+                    onCheckedChange = {
+                        wifiAwarePref = it
+                        meshManager.setWifiAwareEnabled(it)
+                    },
+                )
+
+                RadioPreferenceRow(
+                    title = stringResource(R.string.settings_mesh_pref_dtn_relay),
+                    desc = stringResource(R.string.settings_mesh_pref_dtn_relay_desc),
+                    checked = dtnRelayPref,
+                    enabled = true,
+                    onCheckedChange = {
+                        dtnRelayPref = it
+                        meshManager.setDtnRelayEnabled(it)
+                    },
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.button_close))
+            }
+        },
+        shape = MaterialTheme.shapes.large,
+    )
+}
+
+@Composable
+private fun CapabilityItem(label: String, supported: Boolean) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = if (supported) Icons.Outlined.CheckCircle else Icons.Outlined.Cancel,
+                contentDescription = null,
+                tint = if (supported) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = if (supported) stringResource(R.string.settings_mesh_cap_supported)
+                       else stringResource(R.string.settings_mesh_cap_unsupported),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (supported) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun RadioPreferenceRow(
+    title: String,
+    desc: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled) { onCheckedChange(!checked) }
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+            )
+            Text(
+                text = desc,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            enabled = enabled,
+        )
+    }
+}
+
