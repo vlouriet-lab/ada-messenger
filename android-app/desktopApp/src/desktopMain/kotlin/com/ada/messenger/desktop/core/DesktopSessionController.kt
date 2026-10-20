@@ -79,6 +79,7 @@ class DesktopSessionController(
     @Volatile
     private var core: DesktopAdaCore? = null
     private var webRtcBridge: DesktopWebRtcBridge? = null
+    private var radioEngine: DesktopP2pRadioEngine? = null
     private var unlockedPatternCells: ByteArray? = null
     private var pollJob: Job? = null
 
@@ -1285,6 +1286,8 @@ class DesktopSessionController(
         _videoCallState.value = DesktopVideoCallUiState()
         syncReceiveServer?.stop()
         syncReceiveServer = null
+        radioEngine?.stop()
+        radioEngine = null
         core?.close()
         core = null
         scope.cancel()
@@ -1301,6 +1304,8 @@ class DesktopSessionController(
         _videoCallState.value = DesktopVideoCallUiState()
         syncReceiveServer?.stop()
         syncReceiveServer = null
+        radioEngine?.stop()
+        radioEngine = null
         core?.close()
         core = null
         val pinEnabled = identityStore.isPinEnabled()
@@ -1330,6 +1335,8 @@ class DesktopSessionController(
         _videoCallState.value = DesktopVideoCallUiState()
         syncReceiveServer?.stop()
         syncReceiveServer = null
+        radioEngine?.stop()
+        radioEngine = null
         core?.close()
         core = null
         identityStore.deleteAll()
@@ -1408,10 +1415,25 @@ class DesktopSessionController(
             sendError = null,
             actionMessage = null,
             actionMessageIsError = false,
+            p2pRadioActive = true,
+            p2pRadioPeersCount = 0,
         )
 
         ensureSyncReceiveServerRunning(instance)
+        ensureRadioEngineRunning(instance)
         startEventPolling()
+    }
+
+    private fun ensureRadioEngineRunning(c: DesktopAdaCore) {
+        if (radioEngine != null) return
+        try {
+            val engine = DesktopP2pRadioEngine(core = c, scope = scope)
+            engine.start()
+            radioEngine = engine
+            DesktopCallLog.info("DesktopP2pRadioEngine auto-started on LAN Multicast 239.255.42.99:45824")
+        } catch (e: Exception) {
+            DesktopCallLog.warn("DesktopP2pRadioEngine auto-start failed: ${e.message}")
+        }
     }
 
     /**
@@ -1503,6 +1525,8 @@ class DesktopSessionController(
                 incomingCall = refreshIncomingCallDisplayName(current.incomingCall, conversations, aliases),
                 displayName = activeCore.getDisplayName() ?: current.displayName,
                 peerId = activeCore.getPeerId() ?: current.peerId,
+                p2pRadioActive = radioEngine?.isEngineRunning == true,
+                p2pRadioPeersCount = radioEngine?.peerCount ?: 0,
             )
         }
     }

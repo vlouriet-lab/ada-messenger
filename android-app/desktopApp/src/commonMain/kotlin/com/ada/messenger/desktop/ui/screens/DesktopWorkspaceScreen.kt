@@ -1592,6 +1592,19 @@ private fun SettingsPane(
                 append(state.bridgeStatus?.transportStack ?: "unknown")
                 append("\nMailbox: ")
                 append(state.bridgeStatus?.bridgeMailboxDepth ?: 0)
+                append("\nRadio Mesh: ")
+                append(if (state.p2pRadioActive) "активна (пиров: ${state.p2pRadioPeersCount})" else "в режиме ожидания")
+            },
+        )
+
+        SectionCard(
+            title = "Локальная радиосеть (Off-Grid Radio Mesh)",
+            body = buildString {
+                append("Статус: ")
+                append(if (state.p2pRadioActive) "Активен (LAN Multicast 239.255.42.99:45824)" else "В режиме ожидания")
+                append("\nПиров в радиусе связи: ")
+                append(state.p2pRadioPeersCount)
+                append("\nПротокол: CompactFrame v1 (AD4D) • DTN Store-and-Forward")
             },
         )
 

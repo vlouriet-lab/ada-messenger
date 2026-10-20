@@ -149,4 +149,7 @@ data class DesktopSessionUiState(
     val wifiLinkUrl: String? = null,
     /** True while the Wi-Fi link server is running and waiting for a connection. */
     val wifiLinkActive: Boolean = false,
+    // ── Off-Grid P2P Radio Mesh (LAN Multicast) ──────────────────────────
+    val p2pRadioActive: Boolean = false,
+    val p2pRadioPeersCount: Int = 0,
 )

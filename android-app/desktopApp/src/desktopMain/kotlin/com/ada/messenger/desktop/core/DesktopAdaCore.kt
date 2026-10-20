@@ -181,6 +181,36 @@ class DesktopAdaCore private constructor(private val handle: Long) {
         trustedPublicKeyHex: String,
     ): Int
 
+    // ── Off-Grid Radio Mesh Integration ────────────────────────────────────
+    private external fun nativeReceiveMeshBytes(handle: Long, peerB64: String, bytes: ByteArray): Int
+    private external fun nativeMeshPeerDisconnected(handle: Long, peerB64: String): Int
+    private external fun nativeMeshRadioProcessFrame(handle: Long, bytes: ByteArray, transportKind: Int, hwAddr: String, rssiDbm: Int): ByteArray?
+    private external fun nativeMeshRadioGenerateBeacon(handle: Long): ByteArray?
+    private external fun nativeMeshRadioRegisterPeer(handle: Long, peerB64: String): Int
+    private external fun nativeMeshRadioUpdateMetrics(handle: Long, peerB64: String, transportKind: Int, hwAddr: String, rssiDbm: Int): Int
+    private external fun nativeMeshRadioPrepareFrames(handle: Long, peerB64: String, wireBytes: ByteArray, transportKind: Int, requiresAck: Boolean): Array<ByteArray>?
+
+    fun receiveMeshBytes(peerB64: String, bytes: ByteArray): Boolean =
+        withHandle { nativeReceiveMeshBytes(it, peerB64, bytes) == 0 } ?: false
+
+    fun meshPeerDisconnected(peerB64: String): Boolean =
+        withHandle { nativeMeshPeerDisconnected(it, peerB64) == 0 } ?: false
+
+    fun meshRadioProcessFrame(bytes: ByteArray, transportKind: Int, hwAddr: String = "00:00:00:00:00:00", rssiDbm: Int = -70): ByteArray? =
+        withHandle { nativeMeshRadioProcessFrame(it, bytes, transportKind, hwAddr, rssiDbm) }
+
+    fun meshRadioGenerateBeacon(): ByteArray? =
+        withHandle { nativeMeshRadioGenerateBeacon(it) }
+
+    fun meshRadioRegisterPeer(peerB64: String): Int =
+        withHandle { nativeMeshRadioRegisterPeer(it, peerB64) } ?: 0
+
+    fun meshRadioUpdateMetrics(peerB64: String, transportKind: Int, hwAddr: String, rssiDbm: Int): Boolean =
+        withHandle { nativeMeshRadioUpdateMetrics(it, peerB64, transportKind, hwAddr, rssiDbm) == 0 } ?: false
+
+    fun meshRadioPrepareFrames(peerB64: String, wireBytes: ByteArray, transportKind: Int = 4, requiresAck: Boolean = true): List<ByteArray> =
+        withHandle { nativeMeshRadioPrepareFrames(it, peerB64, wireBytes, transportKind, requiresAck) }?.toList() ?: emptyList()
+
     fun getPeerId(): String? = withHandle { nativeGetPeerId(it) }
 
     fun getDisplayName(): String? = withHandle { nativeGetDisplayName(it) }
