@@ -202,6 +202,7 @@
 Тапните ячейку ещё раз, чтобы сменить цвет (3 цвета на выбор).
 Это ваш визуальный пароль — запомните его."</string>
     <string name="pattern_register_step1_hint">Тап: поставить (цвет 1) → цвет 2 → цвет 3 → убрать.</string>
+    <string name="pattern_register_random_button">Случайный узор</string>
     <string name="pattern_register_step2_title">Подтвердите узор</string>
     <string name="pattern_register_step2_subtitle">Нарисуйте тот же узор с теми же цветами.</string>
 

@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -154,6 +155,11 @@ fun PatternRegistrationScreen(
                         firstPattern = emptyMap()
                         tooFewColorsError = false
                     },
+                    onGenerateRandom = {
+                        firstPattern = generateRandomPattern()
+                        tooFewColorsError = false
+                        shakeError = false
+                    },
                     onNext = {
                         if (firstPattern.size == PATTERN_CUBES) {
                             val distinctColors = firstPattern.values.toSet().size
@@ -259,6 +265,7 @@ private fun DrawStep(
     onColorSelect: ((Int) -> Unit)? = null,
     shakeError: Boolean,
     onClear: () -> Unit,
+    onGenerateRandom: (() -> Unit)? = null,
     onNext: () -> Unit,
     nextEnabled: Boolean,
     nextLabel: String,
@@ -337,6 +344,21 @@ private fun DrawStep(
         }
 
         Spacer(Modifier.weight(1f))
+
+        if (onGenerateRandom != null) {
+            OutlinedButton(
+                onClick = onGenerateRandom,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.pattern_register_random_button))
+            }
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -487,4 +509,15 @@ private fun DoneStep() {
             style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
         )
     }
+}
+
+private fun generateRandomPattern(): Map<Int, Int> {
+    val random = java.security.SecureRandom()
+    val cellIndices = (0 until 64).shuffled(random).take(PATTERN_CUBES)
+    val colors = mutableListOf(0, 1, 2, 3, 4)
+    while (colors.size < PATTERN_CUBES) {
+        colors.add(random.nextInt(5))
+    }
+    colors.shuffle(random)
+    return cellIndices.zip(colors).toMap()
 }

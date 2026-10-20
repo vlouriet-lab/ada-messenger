@@ -193,6 +193,7 @@
     <string name="pattern_register_step1_title">Create a pattern</string>
     <string name="pattern_register_step1_subtitle">Select exactly 16 cells.\nTap a cell again to change its color (3 colors available).\nThis is your visual password — remember it.</string>
     <string name="pattern_register_step1_hint">Tap: set (color 1) → color 2 → color 3 → remove.</string>
+    <string name="pattern_register_random_button">Generate random pattern</string>
     <string name="pattern_register_step2_title">Confirm pattern</string>
     <string name="pattern_register_step2_subtitle">Draw the same pattern with the same colors.</string>
 

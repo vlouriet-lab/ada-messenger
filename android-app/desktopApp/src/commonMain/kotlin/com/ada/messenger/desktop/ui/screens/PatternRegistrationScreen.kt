@@ -179,6 +179,11 @@ fun PatternRegistrationScreen(
                                 localError = null
                                 onClearError()
                             },
+                            onRandom = {
+                                firstPattern = generateRandomPattern()
+                                localError = null
+                                onClearError()
+                            },
                             primaryEnabled = firstPattern.size == PATTERN_CUBES,
                             primaryLabel = "Далее",
                             secondaryLabel = "Очистить",
@@ -404,6 +409,7 @@ private fun RegistrationDrawStep(
     onCellTap: (Int) -> Unit,
     onPrimary: () -> Unit,
     onSecondary: () -> Unit,
+    onRandom: (() -> Unit)? = null,
     primaryEnabled: Boolean,
     primaryLabel: String,
     secondaryLabel: String,
@@ -425,6 +431,14 @@ private fun RegistrationDrawStep(
         )
         if (!hintText.isNullOrBlank()) {
             SupportStrip(text = hintText, isError = hintIsError)
+        }
+        if (onRandom != null) {
+            OutlinedButton(
+                onClick = onRandom,
+                modifier = Modifier.widthIn(max = 320.dp).fillMaxWidth(),
+            ) {
+                Text("Случайный узор")
+            }
         }
         StepActions(
             primaryLabel = primaryLabel,
@@ -512,4 +526,15 @@ private fun StepActions(
             Text(secondaryLabel)
         }
     }
+}
+
+private fun generateRandomPattern(): Map<Int, Int> {
+    val random = java.security.SecureRandom()
+    val cellIndices = (0 until 64).shuffled(random).take(PATTERN_CUBES)
+    val colors = mutableListOf(0, 1, 2, 3, 4)
+    while (colors.size < PATTERN_CUBES) {
+        colors.add(random.nextInt(5))
+    }
+    colors.shuffle(random)
+    return cellIndices.zip(colors).toMap()
 }
