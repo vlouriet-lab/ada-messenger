@@ -2289,15 +2289,14 @@ impl ADACore {
     /// Returns `None` if this device has no link key configured.
     pub fn seal_sync_push(&self, msg: &crate::storage::ChatMessage) -> Option<Vec<u8>> {
         use chacha20poly1305::{aead::Aead, KeyInit, XChaCha20Poly1305, XNonce};
-        use rand::RngCore;
+        use rand::Rng;
 
         let key_bytes = self.id_store.kv().get(DEVICE_LINK_KEY_KV)?;
         let key: [u8; 32] = key_bytes.as_slice().try_into().ok()?;
 
         let plaintext = serde_json::to_vec(msg).ok()?;
 
-        let mut nonce_bytes = [0u8; 24];
-        rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+        let nonce_bytes: [u8; 24] = rand::rngs::OsRng.gen();
         let nonce = XNonce::from_slice(&nonce_bytes);
 
         let cipher = XChaCha20Poly1305::new((&key).into());

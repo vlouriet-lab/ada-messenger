@@ -27,7 +27,7 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chacha20poly1305::aead::Aead;
 use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
-use rand::RngCore;
+use rand::{Rng, RngCore};
 
 // ── Compile-time symmetric key ────────────────────────────────────────────────
 
@@ -243,8 +243,7 @@ pub fn encode(json: &str) -> String {
         Err(_) => json.as_bytes().to_vec(),
     };
 
-    let mut nonce_bytes = [0u8; NONCE_LEN];
-    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce_bytes: [u8; NONCE_LEN] = rand::rngs::OsRng.gen();
     let nonce = XNonce::from_slice(&nonce_bytes);
 
     let ct = cipher()
@@ -379,8 +378,7 @@ mod tests {
         let compact_url = encode(&json);
 
         // Manually produce a legacy (raw-JSON) token for comparison.
-        let mut nonce_bytes = [0u8; NONCE_LEN];
-        rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+        let nonce_bytes: [u8; NONCE_LEN] = rand::rngs::OsRng.gen();
         let nonce = XNonce::from_slice(&nonce_bytes);
         let ct = cipher().encrypt(nonce, json.as_bytes()).unwrap();
         let mut payload = Vec::with_capacity(NONCE_LEN + ct.len());
@@ -400,8 +398,7 @@ mod tests {
     fn legacy_json_still_decodes() {
         // Simulate a v1 token: encrypt raw JSON directly.
         let json = r#"{"id":"abc123","name":"Alice","ver":1}"#;
-        let mut nonce_bytes = [0u8; NONCE_LEN];
-        rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+        let nonce_bytes: [u8; NONCE_LEN] = rand::rngs::OsRng.gen();
         let nonce = XNonce::from_slice(&nonce_bytes);
         let ct = cipher().encrypt(nonce, json.as_bytes()).unwrap();
         let mut payload = Vec::with_capacity(NONCE_LEN + ct.len());

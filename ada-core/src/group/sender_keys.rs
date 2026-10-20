@@ -5,7 +5,9 @@
 //! New members receive the current sender key via pairwise E2E channels.
 //! When a member leaves, all remaining members rotate their keys.
 
-use crate::crypto::symmetric::{decrypt, encrypt, generate_key, hkdf_derive, EncryptedData};
+use crate::crypto::symmetric::{
+    decrypt, encrypt, generate_key, hkdf_derive, hkdf_derive_32, EncryptedData,
+};
 use crate::error::{ADAError, Result};
 use crate::identity::PeerId;
 use rand::rngs::OsRng;
@@ -53,16 +55,8 @@ impl SenderKey {
 
     /// Advance the ratchet and return message key
     pub fn advance(&mut self) -> [u8; 32] {
-        let mut message_key = [0u8; 32];
-        let mut new_chain_key = [0u8; 32];
-
-        hkdf_derive(&self.chain_key, None, b"ada-sender-msg", &mut message_key);
-        hkdf_derive(
-            &self.chain_key,
-            None,
-            b"ada-sender-chain",
-            &mut new_chain_key,
-        );
+        let message_key = hkdf_derive_32(&self.chain_key, None, b"ada-sender-msg");
+        let new_chain_key = hkdf_derive_32(&self.chain_key, None, b"ada-sender-chain");
 
         self.chain_key = new_chain_key;
         self.iteration += 1;
@@ -231,20 +225,16 @@ impl SenderKeySession {
 
         // Advance and buffer intermediate keys
         while state.iteration < msg.iteration {
-            let mut mk = [0u8; 32];
-            let mut new_ck = [0u8; 32];
-            hkdf_derive(&state.chain_key, None, b"ada-sender-msg", &mut mk);
-            hkdf_derive(&state.chain_key, None, b"ada-sender-chain", &mut new_ck);
+            let mk = hkdf_derive_32(&state.chain_key, None, b"ada-sender-msg");
+            let new_ck = hkdf_derive_32(&state.chain_key, None, b"ada-sender-chain");
             state.buffered.insert(state.iteration, mk);
             state.chain_key = new_ck;
             state.iteration += 1;
         }
 
         // Now at the right iteration
-        let mut mk = [0u8; 32];
-        let mut new_ck = [0u8; 32];
-        hkdf_derive(&state.chain_key, None, b"ada-sender-msg", &mut mk);
-        hkdf_derive(&state.chain_key, None, b"ada-sender-chain", &mut new_ck);
+        let mk = hkdf_derive_32(&state.chain_key, None, b"ada-sender-msg");
+        let new_ck = hkdf_derive_32(&state.chain_key, None, b"ada-sender-chain");
         state.chain_key = new_ck;
         state.iteration += 1;
 

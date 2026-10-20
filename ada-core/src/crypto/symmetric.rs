@@ -4,7 +4,7 @@ use aes_gcm::{
     Aes256Gcm, Key, Nonce,
 };
 use hkdf::Hkdf;
-use rand::RngCore;
+use rand::{Rng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
@@ -15,16 +15,13 @@ pub struct EncryptedData {
 }
 
 pub fn generate_key() -> [u8; 32] {
-    let mut key = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut key);
-    key
+    rand::rngs::OsRng.gen()
 }
 
 pub fn encrypt(key_bytes: &[u8], plaintext: &[u8], aad: Option<&[u8]>) -> Result<EncryptedData> {
     let key = Key::<Aes256Gcm>::from_slice(key_bytes);
     let cipher = Aes256Gcm::new(key);
-    let mut nonce_bytes = [0u8; 12];
-    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce_bytes: [u8; 12] = rand::rngs::OsRng.gen();
     let nonce = Nonce::from_slice(&nonce_bytes);
 
     let payload = if let Some(a) = aad {
@@ -82,3 +79,10 @@ pub fn hkdf_derive(salt: &[u8], ikm: Option<&[u8]>, info: &[u8], output: &mut [u
     // 32 ≤ 8160 — expand with a fixed-size buffer is infallible.
     let _ = h.expand(info, output.as_mut_slice());
 }
+
+pub fn hkdf_derive_32(salt: &[u8], ikm: Option<&[u8]>, info: &[u8]) -> [u8; 32] {
+    let mut output = [0u8; 32];
+    hkdf_derive(salt, ikm, info, &mut output);
+    output
+}
+

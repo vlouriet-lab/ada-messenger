@@ -315,10 +315,9 @@ fn derive_ks(seed: &[u8], n: usize) -> Vec<u8> {
     use hkdf::Hkdf;
     use sha2::Sha256;
     let hk = Hkdf::<Sha256>::new(None, seed);
-    let mut key = [0u8; 32];
-    // 32 bytes is always within HKDF-SHA256's output limit (8160 bytes), so expand() is infallible.
-    let _ = hk.expand(b"ada/obfs/ks-v2", &mut key);
-    let cipher_key = ChaChaKey::from_slice(&key);
+    let mut key_buf = vec![0u8; 32];
+    let _ = hk.expand(b"ada/obfs/ks-v2", &mut key_buf);
+    let cipher_key = ChaChaKey::from_slice(&key_buf);
     let nonce = ChaChaNonce::default(); // 12 zero bytes — key is session-unique
     let mut cipher = ChaCha20::new(cipher_key, &nonce);
     let mut out = vec![0u8; n];

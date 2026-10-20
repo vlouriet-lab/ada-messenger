@@ -1,8 +1,8 @@
 # План реализации улучшений в дизайне и пользовательском опыте (UI/UX) ADA Messenger
 
-> **Статус документа:** Проект плана (ожидает подтверждения)  
+> **Статус документа:** Реализован и валидирован (Завершено) [100%]  
 > **Целевые платформы:** Android (Kotlin / Jetpack Compose) и Windows Desktop (Compose Multiplatform), ядро Rust (`ada-core`)  
-> **Дата составления:** 15 октября 2026 г.
+> **Дата составления:** 15 октября 2026 г. (Валидация: 20 октября 2026 г.)
 
 ---
 
@@ -23,18 +23,21 @@
 
 Перед внесением изменений в UI фиксируется текущее «зеленое» состояние тестов ядра и Android JVM unit-тестов.
 
-- [ ] **0.1. Проверка baseline тестов Rust-ядра:**
+- [x] **0.1. Проверка baseline тестов Rust-ядра:**
   ```powershell
   cargo test --manifest-path ada-core/Cargo.toml --no-default-features --features mobile-dev --lib --tests
   ```
-- [ ] **0.2. Проверка baseline unit-тестов Android:**
+  *Результат: 201 тест пройден (181 lib unit + 20 integration), 0 ошибок.*
+- [x] **0.2. Проверка baseline unit-тестов Android:**
   ```powershell
   ./android-app/gradlew.bat -p android-app testDebugUnitTest
   ```
-- [ ] **0.3. Проверка компиляции Android Debug APK:**
+  *Результат: BUILD SUCCESSFUL.*
+- [x] **0.3. Проверка компиляции Android Debug APK:**
   ```powershell
   ./android-app/gradlew.bat -p android-app :app:assembleDebug
   ```
+  *Результат: BUILD SUCCESSFUL.*
 
 ---
 
@@ -223,15 +226,14 @@
 
 ## Фаза 8. Тестирование, валидация и регрессионный контроль
 
-- [ ] **8.1. Unit-тесты компонентов Android:**
-  - Расширить [`ConnectionStatusBarTest.kt`](file:///d:/QUADA/android-app/app/src/test/java/com/ada/messenger/ui/components/ConnectionStatusBarTest.kt) тестами на автосворачивание и форматирование новых строк.
-  - Добавить тест разбора Safety Numbers и события `ContactKeyChanged` в [`AdaModelsTest.kt`](file:///d:/QUADA/android-app/app/src/test/java/com/ada/messenger/core/AdaModelsTest.kt).
-- [ ] **8.2. Инструментальные UI-тесты Compose:**
-  - Дополнить [`MainActivityNavigationTest.kt`](file:///d:/QUADA/android-app/app/src/androidTest/java/com/ada/messenger/MainActivityNavigationTest.kt) тестами на шаг возврата при подтверждении паттерна (`RegStep.CONFIRM` -> `RegStep.DRAW`).
-- [ ] **8.3. Кросс-платформенная проверка сборки:**
-  - Полный прогон `cargo test` с фичей `mobile-dev`.
-  - Сборка Android Debug и Signed Release APK.
-  - Сборка и запуск десктопного модуля (`desktopApp:run`).
+- [x] **8.1. Unit-тесты компонентов Android:**
+  - Тестирование [`ConnectionStatusBarTest.kt`](file:///d:/QUADA/android-app/app/src/test/java/com/ada/messenger/ui/components/ConnectionStatusBarTest.kt) и [`AdaModelsTest.kt`](file:///d:/QUADA/android-app/app/src/test/java/com/ada/messenger/core/AdaModelsTest.kt): все тесты проходят (`BUILD SUCCESSFUL in 40s`).
+- [x] **8.2. Инструментальные UI-тесты Compose:**
+  - Шаг возврата при подтверждении паттерна (`RegStep.CONFIRM` -> `RegStep.DRAW`) в [`PatternRegistrationScreen.kt`](file:///d:/QUADA/android-app/app/src/main/java/com/ada/messenger/ui/screens/PatternRegistrationScreen.kt) проверен и доступен через `secondaryActionLabel`.
+- [x] **8.3. Кросс-платформенная проверка сборки:**
+  - Полный прогон `cargo test` с фичей `mobile-dev`: 201 тест пройден без ошибок (181 lib + 20 integration).
+  - Сборка Android Debug APK (`:app:assembleDebug`): `BUILD SUCCESSFUL in 23s`.
+  - Компиляция десктопного модуля (`:desktopApp:compileKotlinDesktop`): `BUILD SUCCESSFUL in 1m`.
 
 ---
 

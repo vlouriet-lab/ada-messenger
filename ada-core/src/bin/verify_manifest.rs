@@ -15,20 +15,20 @@ fn split_key_values(raw: &str) -> impl Iterator<Item = &str> {
         .filter(|value| !value.is_empty())
 }
 
-fn decode_public_keys(raw: &str) -> anyhow::Result<Vec<[u8; 32]>> {
-    let mut keys = Vec::new();
-    for key in split_key_values(raw) {
-        let bytes = hex::decode(key.replace(':', ""))
-            .with_context(|| format!("manifest public key is not valid hex: {key}"))?;
-        let key_bytes: [u8; 32] = bytes
+fn decode_signing_anchors(raw: &str) -> anyhow::Result<Vec<[u8; 32]>> {
+    let mut anchors = Vec::new();
+    for item in split_key_values(raw) {
+        let bytes = hex::decode(item.replace(':', ""))
+            .with_context(|| format!("manifest signing anchor is not valid hex: {item}"))?;
+        let anchor_bytes: [u8; 32] = bytes
             .try_into()
-            .map_err(|_| anyhow!("manifest public key must decode to exactly 32 bytes: {key}"))?;
-        keys.push(key_bytes);
+            .map_err(|_| anyhow!("manifest signing anchor must decode to exactly 32 bytes: {item}"))?;
+        anchors.push(anchor_bytes);
     }
-    if keys.is_empty() {
-        return Err(anyhow!("no manifest public keys provided"));
+    if anchors.is_empty() {
+        return Err(anyhow!("no manifest signing anchors provided"));
     }
-    Ok(keys)
+    Ok(anchors)
 }
 
 fn main() -> anyhow::Result<()> {
@@ -37,7 +37,7 @@ fn main() -> anyhow::Result<()> {
         Some(path) => PathBuf::from(path),
         None => usage(),
     };
-    let public_keys_raw = match args.next() {
+    let anchors_raw = match args.next() {
         Some(value) => value.to_string_lossy().to_string(),
         None => env::var("ADA_BUILTIN_MANIFEST_PUBLIC_KEYS")
             .context("public keys argument missing and ADA_BUILTIN_MANIFEST_PUBLIC_KEYS is not set")?,
@@ -50,15 +50,15 @@ fn main() -> anyhow::Result<()> {
         .with_context(|| format!("failed to read {}", input_path.display()))?;
     let signed_manifest: SignedBridgeManifest = serde_json::from_str(manifest_json.trim_start_matches('\u{feff}'))
         .with_context(|| format!("failed to parse {}", input_path.display()))?;
-    let public_keys = decode_public_keys(&public_keys_raw)?;
-    let payload = signed_manifest.verify(&public_keys)?;
+    let trusted_anchors = decode_signing_anchors(&anchors_raw)?;
+    let manifest_payload = signed_manifest.verify(&trusted_anchors)?;
 
-    eprintln!("manifest verified");
-    eprintln!("version: {}", payload.version);
-    eprintln!("ttl_secs: {}", payload.ttl_secs);
-    eprintln!("bridge count: {}", payload.bridges.len());
-    for bridge in payload.bridges {
-        eprintln!(
+    println!("manifest verified");
+    println!("version: {}", manifest_payload.version);
+    println!("ttl_secs: {}", manifest_payload.ttl_secs);
+    println!("bridge count: {}", manifest_payload.bridges.len());
+    for bridge in manifest_payload.bridges {
+        println!(
             "bridge: id={} protocol={} host={} port={} priority={} active={}",
             bridge.id,
             bridge.protocol,

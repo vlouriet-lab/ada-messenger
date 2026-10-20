@@ -5,7 +5,7 @@
 
 use crate::error::{ADAError, Result};
 use hkdf::Hkdf;
-use rand::{rngs::OsRng, RngCore};
+use rand::{rngs::OsRng, Rng, RngCore};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -192,8 +192,7 @@ impl DpiMorpher {
             )));
         }
 
-        let mut salt = [0u8; 16];
-        OsRng.fill_bytes(&mut salt);
+        let salt: [u8; 16] = OsRng.gen();
 
         let mut body = Vec::with_capacity(bucket_size);
         body.extend_from_slice(&salt);

@@ -550,8 +550,8 @@ impl KeyValueStore {
 /// Encrypt with XChaCha20-Poly1305 (192-bit random nonce — negligible collision probability).
 fn encrypt_chacha(key: &[u8; 32], plaintext: &[u8], aad: &[u8]) -> Result<([u8; 24], Vec<u8>)> {
     let cipher = XChaCha20Poly1305::new(key.into());
-    let mut nonce_bytes = [0u8; 24];
-    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+    use rand::Rng;
+    let nonce_bytes: [u8; 24] = rand::rngs::OsRng.gen();
     let nonce = XNonce::from_slice(&nonce_bytes);
     let ciphertext = cipher
         .encrypt(
@@ -676,14 +676,12 @@ impl IdentityStore {
     /// Load existing KDF salt or generate + store a fresh one.
     fn load_or_create_identity_salt(&self) -> Result<[u8; 32]> {
         if let Some(existing) = self.kv.get("identity.kdf_salt") {
-            if existing.len() == 32 {
-                let mut arr = [0u8; 32];
-                arr.copy_from_slice(&existing);
+            if let Ok(arr) = existing.as_slice().try_into() {
                 return Ok(arr);
             }
         }
-        let mut salt = [0u8; 32];
-        rand::rngs::OsRng.fill_bytes(&mut salt);
+        use rand::Rng;
+        let salt: [u8; 32] = rand::rngs::OsRng.gen();
         self.kv.set("identity.kdf_salt", salt.to_vec())?;
         Ok(salt)
     }

@@ -487,10 +487,9 @@ fn kdf_rk(root_key: &[u8; 32], dh_output: &[u8]) -> ([u8; 32], [u8; 32]) {
 
 /// Chain KDF: given chain key, produce (new_chain_key, message_key).
 fn kdf_ck(chain_key: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
-    let mut new_ck = [0u8; 32];
-    let mut mk = [0u8; 32];
-    hkdf_derive(&[], Some(chain_key.as_slice()), CHAIN_KDF_INFO, &mut new_ck);
-    hkdf_derive(&[], Some(chain_key.as_slice()), MSG_KDF_INFO, &mut mk);
+    use crate::crypto::symmetric::hkdf_derive_32;
+    let new_ck = hkdf_derive_32(&[], Some(chain_key.as_slice()), CHAIN_KDF_INFO);
+    let mk = hkdf_derive_32(&[], Some(chain_key.as_slice()), MSG_KDF_INFO);
     (new_ck, mk)
 }
 

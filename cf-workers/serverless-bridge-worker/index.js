@@ -75,6 +75,21 @@ function responseJson(value, status = 200) {
   });
 }
 
+function sanitizeErrorMessage(error) {
+  if (error && typeof error.status === "number" && error.status < 500) {
+    const raw = error instanceof Error ? error.message : String(error || "");
+    const firstLine = raw.split("\n")[0].trim();
+    if (firstLine.length > 0 && !firstLine.includes("at ") && !firstLine.includes("Error:")) {
+      return firstLine.slice(0, 200);
+    }
+    if (error.status === 401) return "Unauthorized";
+    if (error.status === 413) return "Payload too large";
+    if (error.status === 429) return "Rate limit exceeded";
+    return "Bad request";
+  }
+  return "Internal error";
+}
+
 function responseNoContent(status = 204) {
   return new Response(null, { status });
 }
@@ -584,7 +599,7 @@ export class AdaBridge extends DurableObject {
       if (error?.status === 401) this.recordAuthFailure();
       if (error?.status === 413) this.counters.oversize_rejected_total += 1;
       return responseJson(
-        { message: error instanceof Error ? error.message : String(error) },
+        { message: sanitizeErrorMessage(error) },
         error?.status || 400,
       );
     }
@@ -614,7 +629,7 @@ export class AdaBridge extends DurableObject {
     } catch (error) {
       if (error?.status === 401) this.recordAuthFailure();
       return responseJson(
-        { message: error instanceof Error ? error.message : String(error) },
+        { message: sanitizeErrorMessage(error) },
         error?.status || 400,
       );
     }
@@ -653,7 +668,7 @@ export class AdaBridge extends DurableObject {
     } catch (error) {
       if (error?.status === 401) this.recordAuthFailure();
       return responseJson(
-        { message: error instanceof Error ? error.message : String(error) },
+        { message: sanitizeErrorMessage(error) },
         error?.status || 400,
       );
     }

@@ -131,12 +131,12 @@ impl PatternKey {
     /// Canonical 32-byte password fed to Argon2id:
     /// `[idx0, color0, idx1, color1, …]` sorted by `idx`.
     pub fn to_password_bytes(&self) -> [u8; PATTERN_KEY_BYTES] {
-        let mut out = [0u8; PATTERN_KEY_BYTES];
-        for (i, &(idx, color)) in self.cells.iter().enumerate() {
-            out[i * 2] = idx;
-            out[i * 2 + 1] = color;
+        let mut bytes = Vec::with_capacity(PATTERN_KEY_BYTES);
+        for &(idx, color) in &self.cells {
+            bytes.push(idx);
+            bytes.push(color);
         }
-        out
+        bytes.try_into().unwrap_or_else(|_| panic!("pattern bytes must be exactly {}", PATTERN_KEY_BYTES))
     }
 
     /// The sorted `(cell_idx, color_idx)` pairs — useful for UI replay.
@@ -363,26 +363,23 @@ pub fn parse_contact_card(json: &str) -> Result<PatternContactCard> {
 /// Load the per-user Argon2id salt from `{data_dir}/ada_identity.salt`.
 /// Creates and persists a fresh 32-byte random salt on first call.
 fn load_or_create_salt(data_dir: &str) -> Result<[u8; 32]> {
+    use rand::Rng;
     if !data_dir.is_empty() {
         let path = format!("{}/{}", data_dir, IDENTITY_SALT_FILE);
         if let Ok(bytes) = std::fs::read(&path) {
-            if bytes.len() == IDENTITY_SALT_LEN {
-                let mut arr = [0u8; IDENTITY_SALT_LEN];
-                arr.copy_from_slice(&bytes);
+            if let Ok(arr) = bytes.as_slice().try_into() {
                 return Ok(arr);
             }
         }
         // Generate a fresh salt for new registrations.
-        let mut salt = [0u8; IDENTITY_SALT_LEN];
-        rand::rngs::OsRng.fill_bytes(&mut salt);
+        let salt: [u8; IDENTITY_SALT_LEN] = rand::rngs::OsRng.gen();
         std::fs::create_dir_all(data_dir)
             .map_err(|e| ADAError::Storage(format!("mkdir: {}", e)))?;
         std::fs::write(&path, salt).map_err(|e| ADAError::Storage(format!("write salt: {}", e)))?;
         return Ok(salt);
     }
     // In-memory / test path: generate ephemeral salt (not persisted).
-    let mut salt = [0u8; IDENTITY_SALT_LEN];
-    rand::rngs::OsRng.fill_bytes(&mut salt);
+    let salt: [u8; IDENTITY_SALT_LEN] = rand::rngs::OsRng.gen();
     Ok(salt)
 }
 
