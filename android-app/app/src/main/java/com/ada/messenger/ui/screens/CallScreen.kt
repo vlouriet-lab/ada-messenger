@@ -20,6 +20,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import com.ada.messenger.ui.components.PeerAvatar
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.CallMade
@@ -456,51 +459,171 @@ private fun ActiveCallView(
                 ) { controlsVisible = !controlsVisible }
         ) {
 
-            // Remote video — full screen
-            // V-15: Blur background when overlay is visible
-            val remoteRenderer = remember {
-                mutableStateOf<SurfaceViewRenderer?>(null)
-            }
-            AndroidView(
-                factory = { ctx ->
-                    SurfaceViewRenderer(ctx).also { r ->
-                        r.layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                        )
-                        r.init(sharedEglBase.eglBaseContext, null)
-                        r.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
-                        remoteRenderer.value = r
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .then(
-                        if (controlsVisible && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                            Modifier.blur(8.dp)
-                        else Modifier
-                    )
-            )
-            // Connect / disconnect remote sink with call lifecycle
+            val remoteRenderer = remember { mutableStateOf<SurfaceViewRenderer?>(null) }
+            val localRenderer = remember { mutableStateOf<SurfaceViewRenderer?>(null) }
+
+            // Connect / disconnect remote and local sinks with call lifecycle
             DisposableEffect(Unit) {
                 onDispose {
                     viewModel.setRemoteVideoSink(null)
                     remoteRenderer.value?.release()
+                    viewModel.setLocalVideoSink(null)
+                    localRenderer.value?.release()
                 }
             }
             LaunchedEffect(remoteRenderer.value) {
                 remoteRenderer.value?.let { viewModel.setRemoteVideoSink(it) }
             }
+            LaunchedEffect(localRenderer.value) {
+                localRenderer.value?.let { viewModel.setLocalVideoSink(it) }
+            }
 
-            // Self-view (local camera) — PiP bottom-end corner
-            val localRenderer = remember { mutableStateOf<SurfaceViewRenderer?>(null) }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 16.dp, bottom = 120.dp)
-                    .size(width = 100.dp, height = 140.dp)
-                    .background(Color.Black, shape = MaterialTheme.shapes.medium)
-            ) {
+            val isGroupGrid = info.participants.size >= 3
+            if (isGroupGrid) {
+                // ── 2x2 Grid Layout for Group Video Calls (3–4 participants) ──
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 8.dp, vertical = 72.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    // Top Row: Primary remote video & second participant
+                    Row(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        // Cell 1: Primary Remote video renderer with active speaker outline
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF1E1E1E))
+                                .border(
+                                    width = if (info.state == CallState.Active) 2.dp else 1.dp,
+                                    color = if (info.state == CallState.Active) Color(0xFF66BB6A) else Color.DarkGray,
+                                    shape = RoundedCornerShape(12.dp),
+                                ),
+                        ) {
+                            AndroidView(
+                                factory = { ctx ->
+                                    SurfaceViewRenderer(ctx).also { r ->
+                                        r.layoutParams = ViewGroup.LayoutParams(
+                                            ViewGroup.LayoutParams.MATCH_PARENT,
+                                            ViewGroup.LayoutParams.MATCH_PARENT,
+                                        )
+                                        r.init(sharedEglBase.eglBaseContext, null)
+                                        r.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                                        remoteRenderer.value = r
+                                    }
+                                },
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                            Text(
+                                text = info.displayName.ifBlank { info.peerIdB64.take(8) },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White,
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(topEnd = 6.dp))
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                            )
+                        }
+
+                        // Cell 2: Second participant
+                        val p2 = info.participants.getOrNull(1)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF252525))
+                                .border(1.dp, Color.DarkGray, RoundedCornerShape(12.dp)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (p2 != null) {
+                                PeerAvatar(peerId = p2, size = 56.dp)
+                                Text(
+                                    text = p2.take(8) + "…",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.White,
+                                    modifier = Modifier
+                                        .align(Alignment.BottomStart)
+                                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(topEnd = 6.dp))
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                )
+                            }
+                        }
+                    }
+
+                    // Bottom Row: Third participant & Local self-view
+                    Row(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        // Cell 3: Third participant (if any) or placeholder
+                        val p3 = info.participants.getOrNull(2)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF252525))
+                                .border(1.dp, Color.DarkGray, RoundedCornerShape(12.dp)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (p3 != null) {
+                                PeerAvatar(peerId = p3, size = 56.dp)
+                                Text(
+                                    text = p3.take(8) + "…",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.White,
+                                    modifier = Modifier
+                                        .align(Alignment.BottomStart)
+                                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(topEnd = 6.dp))
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                )
+                            }
+                        }
+
+                        // Cell 4: Self-view local camera renderer
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF1E1E1E))
+                                .border(1.dp, Color.DarkGray, RoundedCornerShape(12.dp)),
+                        ) {
+                            AndroidView(
+                                factory = { ctx ->
+                                    SurfaceViewRenderer(ctx).also { r ->
+                                        r.layoutParams = ViewGroup.LayoutParams(
+                                            ViewGroup.LayoutParams.MATCH_PARENT,
+                                            ViewGroup.LayoutParams.MATCH_PARENT,
+                                        )
+                                        r.init(sharedEglBase.eglBaseContext, null)
+                                        r.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                                        r.setMirror(true)   // selfie mirror
+                                        localRenderer.value = r
+                                    }
+                                },
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                            Text(
+                                text = stringResource(R.string.call_self_view_label),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White,
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(topEnd = 6.dp))
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                            )
+                        }
+                    }
+                }
+            } else {
+                // ── 1-on-1 Layout: Remote video full screen + PiP in corner ──
                 AndroidView(
                     factory = { ctx ->
                         SurfaceViewRenderer(ctx).also { r ->
@@ -510,21 +633,42 @@ private fun ActiveCallView(
                             )
                             r.init(sharedEglBase.eglBaseContext, null)
                             r.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
-                            r.setMirror(true)   // selfie mirror
-                            localRenderer.value = r
+                            remoteRenderer.value = r
                         }
                     },
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(
+                            if (controlsVisible && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                                Modifier.blur(8.dp)
+                            else Modifier
+                        )
                 )
-            }
-            DisposableEffect(Unit) {
-                onDispose {
-                    viewModel.setLocalVideoSink(null)
-                    localRenderer.value?.release()
+
+                // Self-view (local camera) — PiP bottom-end corner
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 16.dp, bottom = 120.dp)
+                        .size(width = 100.dp, height = 140.dp)
+                        .background(Color.Black, shape = MaterialTheme.shapes.medium)
+                ) {
+                    AndroidView(
+                        factory = { ctx ->
+                            SurfaceViewRenderer(ctx).also { r ->
+                                r.layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                )
+                                r.init(sharedEglBase.eglBaseContext, null)
+                                r.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                                r.setMirror(true)   // selfie mirror
+                                localRenderer.value = r
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
-            }
-            LaunchedEffect(localRenderer.value) {
-                localRenderer.value?.let { viewModel.setLocalVideoSink(it) }
             }
 
             // Status overlay (top)

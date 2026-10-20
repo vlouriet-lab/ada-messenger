@@ -113,21 +113,49 @@ private fun avatarFor(seed: String): AvatarDef {
 }
 
 /**
- * Аватарка для прямого чата — градиентный фон + emoji, детерминированный по peer ID.
+ * Computes up to 2 uppercase initials from a display name, or a deterministic
+ * 2-letter monogram from the peer ID for unnamed peers.
+ */
+fun peerInitialsFor(displayName: String?, peerId: String): String {
+    val clean = displayName?.trim().orEmpty()
+    val words = clean.split(' ', '_', '-').filter { it.isNotBlank() }
+    val letters = words.mapNotNull { word -> word.firstOrNull { it.isLetter() } }
+    if (letters.isNotEmpty() && !clean.startsWith("ada://") && clean.length < 40) {
+        return letters.take(2).joinToString("").uppercase()
+    }
+    val h = abs(peerId.fold(0) { acc, c -> acc * 31 + c.code })
+    val c1 = ('A'.code + (h % 26)).toChar()
+    val c2 = ('A'.code + ((h / 26) % 26)).toChar()
+    return "$c1$c2"
+}
+
+/**
+ * Аватарка для прямого чата — детерминированный градиентный фон + двухбуквенная монограмма
+ * или эмодзи, вычисляемые по имени или peer ID.
  */
 @Composable
 fun PeerAvatar(
     peerId: String,
     modifier: Modifier = Modifier,
+    displayName: String? = null,
     size: Dp = 42.dp,
     isOnline: Boolean? = null,
+    useInitials: Boolean = true,
 ) {
     val av = avatarFor(peerId)
+    val initials = remember(displayName, peerId) { peerInitialsFor(displayName, peerId) }
     val (c1, c2) = remember(peerId) { gradientColorsFor(peerId) }
     val brush = Brush.linearGradient(listOf(c1, c2))
+    val displayText = if (useInitials) initials else av.emoji
     if (isOnline != null) {
         Box(modifier = modifier) {
-            AvatarCircle(emoji = av.emoji, bg = av.bg, size = size, brush = brush)
+            AvatarCircle(
+                text = displayText,
+                bg = av.bg,
+                size = size,
+                brush = brush,
+                isInitials = useInitials,
+            )
             val dotSize = (size.value * 0.28f).dp
             Surface(
                 shape = MaterialTheme.shapes.extraLarge,
@@ -141,7 +169,14 @@ fun PeerAvatar(
             ) {}
         }
     } else {
-        AvatarCircle(emoji = av.emoji, bg = av.bg, size = size, brush = brush, modifier = modifier)
+        AvatarCircle(
+            text = displayText,
+            bg = av.bg,
+            size = size,
+            brush = brush,
+            modifier = modifier,
+            isInitials = useInitials,
+        )
     }
 }
 
@@ -155,7 +190,7 @@ fun GroupAvatar(
         listOf(Color(0xFF3D2B99), Color(0xFF00897B)),
     )
     AvatarCircle(
-        emoji = GROUP_AVATAR.emoji,
+        text = GROUP_AVATAR.emoji,
         bg = GROUP_AVATAR.bg,
         size = size,
         brush = brush,
@@ -171,7 +206,7 @@ fun OwnAvatar(
     size: Dp = 42.dp,
 ) {
     val av = avatarByIndex(index)
-    AvatarCircle(emoji = av.emoji, bg = av.bg, size = size, modifier = modifier)
+    AvatarCircle(text = av.emoji, bg = av.bg, size = size, modifier = modifier)
 }
 
 /** V-34: Диалог выбора аватарки — круговая сетка с анимацией выбора. */
@@ -230,11 +265,12 @@ fun AvatarPickerDialog(
 
 @Composable
 private fun AvatarCircle(
-    emoji: String,
+    text: String,
     bg: Color,
     size: Dp,
     modifier: Modifier = Modifier,
     brush: Brush? = null,
+    isInitials: Boolean = false,
 ) {
     Box(
         contentAlignment = Alignment.Center,
@@ -247,8 +283,11 @@ private fun AvatarCircle(
             ),
     ) {
         Text(
-            text = emoji,
-            fontSize = (size.value * 0.52f).sp,
+            text = text,
+            fontSize = if (isInitials) (size.value * 0.40f).sp else (size.value * 0.52f).sp,
+            fontWeight = if (isInitials) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal,
+            color = if (isInitials) Color.White else MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
         )
     }
 }

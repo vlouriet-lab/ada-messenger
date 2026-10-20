@@ -31,8 +31,10 @@ const MAX_SKIP: u32 = 256;
 /// iteration — good enough for mobile where this path is rarely hit).
 const MAX_SKIPPED_KEYS_TOTAL: usize = 1024;
 
-/// Root KDF constant
+/// Root KDF constant (classical)
 const ROOT_KDF_INFO: &[u8] = b"ADA-RootKDF-v1";
+/// Root KDF constant (hybrid post-quantum)
+const PQ_ROOT_KDF_INFO: &[u8] = b"ADA-PQ-RootKDF-v1";
 /// Chain KDF constant
 const CHAIN_KDF_INFO: &[u8] = b"ADA-ChainKDF-v1";
 /// Message KDF constant
@@ -48,6 +50,14 @@ pub struct MessageHeader {
     pub prev_chain_len: u32,
     /// Message number within the current sending chain (0-indexed)
     pub message_number: u32,
+    /// Optional PQ encapsulation public key (ML-KEM-768, 1184 bytes) advertised by sender
+    /// on asymmetric ratchet steps.
+    #[serde(default)]
+    pub pq_ratchet_public: Option<Vec<u8>>,
+    /// Optional PQ ciphertext (ML-KEM-768, 1088 bytes) encapsulated against recipient's
+    /// previously advertised PQ ratchet key.
+    #[serde(default)]
+    pub pq_ratchet_ciphertext: Option<Vec<u8>>,
 }
 
 /// A complete ratchet-encrypted message (header + ciphertext).
@@ -96,6 +106,22 @@ pub struct RatchetState {
 
     // --- Whether we have performed the initial DH step ---
     pub initialised: bool,
+
+    // --- Hybrid PQ Ratchet extensions (SPQR) ---
+    #[serde(default)]
+    pub pq_enabled: bool,
+    #[serde(default)]
+    pub pq_self_secret: Option<crate::crypto::pq::MlKem768SecretKey>,
+    #[serde(default)]
+    pub pq_self_public: Option<crate::crypto::pq::MlKem768PublicKey>,
+    #[serde(default)]
+    pub pq_remote_public: Option<crate::crypto::pq::MlKem768PublicKey>,
+    /// Current PQ ciphertext to include on outgoing messages of this ratchet generation
+    #[serde(default)]
+    pub current_pq_ciphertext: Option<Vec<u8>>,
+    /// Current PQ public key to include on outgoing messages of this ratchet generation
+    #[serde(default)]
+    pub current_pq_public: Option<Vec<u8>>,
 }
 
 /// Manual `Drop` that explicitly zeroizes all sensitive key bytes including
@@ -110,42 +136,49 @@ impl Drop for RatchetState {
             v.zeroize();
         }
         self.skipped_keys.clear();
+        if let Some(mut sec) = self.pq_self_secret.take() {
+            sec.zeroize();
+        }
     }
 }
 
 /// Manual `Clone` implementation for RatchetState.
-///
-/// We cannot use `#[derive(Clone)]` here because a derived `Clone` on a type
-/// with a non-trivial `Drop` can mislead static analysers into thinking the
-/// clone shares memory with the original.  This explicit impl makes the deep
-/// copy semantics unambiguous.  The clone gets its own `Drop`, so key bytes
-/// are zeroized independently when the clone is dropped.
-///
-/// Used by `SessionManager::export_sessions()` (СРЕД-21 fix).
 impl Clone for RatchetState {
     fn clone(&self) -> Self {
         RatchetState {
-            dh_self_secret:      self.dh_self_secret,
-            dh_self_public:      self.dh_self_public,
-            dh_remote_public:    self.dh_remote_public,
-            root_key:            self.root_key,
-            sending_chain_key:   self.sending_chain_key,
-            send_count:          self.send_count,
-            receiving_chain_key: self.receiving_chain_key,
-            recv_count:          self.recv_count,
-            prev_send_count:     self.prev_send_count,
-            skipped_keys:        self.skipped_keys.clone(),
-            initialised:         self.initialised,
+            dh_self_secret:        self.dh_self_secret,
+            dh_self_public:        self.dh_self_public,
+            dh_remote_public:      self.dh_remote_public,
+            root_key:              self.root_key,
+            sending_chain_key:     self.sending_chain_key,
+            send_count:            self.send_count,
+            receiving_chain_key:   self.receiving_chain_key,
+            recv_count:            self.recv_count,
+            prev_send_count:       self.prev_send_count,
+            skipped_keys:          self.skipped_keys.clone(),
+            initialised:           self.initialised,
+            pq_enabled:            self.pq_enabled,
+            pq_self_secret:        self.pq_self_secret.clone(),
+            pq_self_public:        self.pq_self_public.clone(),
+            pq_remote_public:      self.pq_remote_public.clone(),
+            current_pq_ciphertext: self.current_pq_ciphertext.clone(),
+            current_pq_public:     self.current_pq_public.clone(),
         }
     }
 }
 
 impl RatchetState {
-    /// Initialise ratchet as the session *initiator* (Alice).
-    ///
-    /// `shared_secret` comes from X3DH.
-    /// `their_ratchet_public` is Bob's initial ratchet key (= spk_public from his bundle).
+    /// Initialise ratchet as the session *initiator* (Alice) in classical mode.
     pub fn init_sender(shared_secret: [u8; 32], their_ratchet_public: [u8; 32]) -> Self {
+        Self::init_sender_pq(shared_secret, their_ratchet_public, None)
+    }
+
+    /// Initialise ratchet as the session *initiator* (Alice) with optional hybrid PQ ratchet (SPQR).
+    pub fn init_sender_pq(
+        shared_secret: [u8; 32],
+        their_ratchet_public: [u8; 32],
+        their_pq_ratchet_public: Option<crate::crypto::pq::MlKem768PublicKey>,
+    ) -> Self {
         // Generate our first DH ratchet key pair
         let dh_self_secret = StaticSecret::random_from_rng(rand::rngs::OsRng);
         let dh_self_public = PublicKey::from(&dh_self_secret).to_bytes();
@@ -153,8 +186,28 @@ impl RatchetState {
         // Perform the first DH step
         let dh_out = dh_self_secret.diffie_hellman(&PublicKey::from(their_ratchet_public));
 
-        // Derive root key and sending chain key from the shared secret + DH output
-        let (root_key, sending_ck) = kdf_rk(&shared_secret, dh_out.as_bytes());
+        // If remote peer supports PQ, encapsulate and prepare sender's PQ keys
+        let (pq_enabled, pq_self_sec, pq_self_pub, pending_pq_pub, pending_pq_ct, pq_ss) =
+            if let Some(ref remote_pq) = their_pq_ratchet_public {
+                let (alice_pq_pub, alice_pq_sec) =
+                    crate::crypto::pq::MlKem768::keygen().expect("ML-KEM keygen");
+                let (ct, ss) =
+                    crate::crypto::pq::MlKem768::encapsulate(remote_pq).expect("ML-KEM encapsulate");
+                (
+                    true,
+                    Some(alice_pq_sec),
+                    Some(alice_pq_pub.clone()),
+                    Some(alice_pq_pub.0),
+                    Some(ct.0),
+                    Some(ss.0),
+                )
+            } else {
+                (false, None, None, None, None, None)
+            };
+
+        // Derive root key and sending chain key from the shared secret + DH output (+ optional PQ secret)
+        let (root_key, sending_ck) =
+            kdf_rk_hybrid(&shared_secret, dh_out.as_bytes(), pq_ss.as_ref().map(|s| s.as_slice()));
 
         RatchetState {
             dh_self_secret: dh_self_secret.to_bytes(),
@@ -168,15 +221,29 @@ impl RatchetState {
             prev_send_count: 0,
             skipped_keys: HashMap::new(),
             initialised: true,
+            pq_enabled,
+            pq_self_secret: pq_self_sec,
+            pq_self_public: pq_self_pub,
+            pq_remote_public: their_pq_ratchet_public,
+            current_pq_ciphertext: pending_pq_ct,
+            current_pq_public: pending_pq_pub,
         }
     }
 
-    /// Initialise ratchet as the session *responder* (Bob).
-    ///
-    /// `shared_secret` comes from X3DH.
-    /// `our_ratchet_secret` is Bob's SPK secret (same key Alice used for the DH step).
+    /// Initialise ratchet as the session *responder* (Bob) in classical mode.
     pub fn init_receiver(shared_secret: [u8; 32], our_ratchet_secret: [u8; 32]) -> Self {
+        Self::init_receiver_pq(shared_secret, our_ratchet_secret, None, None)
+    }
+
+    /// Initialise ratchet as the session *responder* (Bob) with optional hybrid PQ ratchet (SPQR).
+    pub fn init_receiver_pq(
+        shared_secret: [u8; 32],
+        our_ratchet_secret: [u8; 32],
+        our_pq_secret: Option<crate::crypto::pq::MlKem768SecretKey>,
+        our_pq_public: Option<crate::crypto::pq::MlKem768PublicKey>,
+    ) -> Self {
         let our_public = PublicKey::from(&StaticSecret::from(our_ratchet_secret)).to_bytes();
+        let pq_enabled = our_pq_secret.is_some();
         RatchetState {
             dh_self_secret: our_ratchet_secret,
             dh_self_public: our_public,
@@ -189,6 +256,12 @@ impl RatchetState {
             prev_send_count: 0,
             skipped_keys: HashMap::new(),
             initialised: false,
+            pq_enabled,
+            pq_self_secret: our_pq_secret,
+            pq_self_public: our_pq_public,
+            pq_remote_public: None,
+            current_pq_ciphertext: None,
+            current_pq_public: None,
         }
     }
 
@@ -202,11 +275,12 @@ impl RatchetState {
             dh_public: self.dh_self_public,
             prev_chain_len: self.prev_send_count,
             message_number: self.send_count,
+            pq_ratchet_public: self.current_pq_public.clone(),
+            pq_ratchet_ciphertext: self.current_pq_ciphertext.clone(),
         };
         self.send_count += 1;
 
         // Use the header bytes as AAD for authenticated encryption.
-        // Evaluate result before zeroizing so mk is alive during encrypt.
         let aad = header_aad(&header);
         let result = encrypt(&mk, plaintext, Some(&aad));
         mk.zeroize(); // zero regardless of success/failure
@@ -233,8 +307,12 @@ impl RatchetState {
             // Skip messages in the current receiving chain (if any)
             self.skip_message_keys(header.prev_chain_len)?;
 
-            // Perform DH ratchet
-            self.dh_ratchet_step(header.dh_public)?;
+            // Perform DH (+ optional PQ) ratchet
+            self.dh_ratchet_step(
+                header.dh_public,
+                header.pq_ratchet_public.as_deref(),
+                header.pq_ratchet_ciphertext.as_deref(),
+            )?;
         }
 
         // Skip any messages in the current receiving chain before this one
@@ -271,8 +349,6 @@ impl RatchetState {
             self.recv_count += 1;
         }
         // Evict oldest entries if we've exceeded the global cap.
-        // This prevents a slow DoS via many small messages in rapid succession
-        // across many DH ratchet steps.
         if self.skipped_keys.len() > MAX_SKIPPED_KEYS_TOTAL {
             let evict_count = MAX_SKIPPED_KEYS_TOTAL / 4;
             let keys_to_evict: Vec<_> = self
@@ -290,25 +366,72 @@ impl RatchetState {
         Ok(())
     }
 
-    /// Perform one DH ratchet step upon receiving a new remote ratchet key.
-    fn dh_ratchet_step(&mut self, their_new_public: [u8; 32]) -> Result<()> {
+    /// Perform one DH (+ optional hybrid PQ) ratchet step upon receiving a new remote ratchet key.
+    fn dh_ratchet_step(
+        &mut self,
+        their_new_public: [u8; 32],
+        their_new_pq_public: Option<&[u8]>,
+        pq_ciphertext: Option<&[u8]>,
+    ) -> Result<()> {
         self.prev_send_count = self.send_count;
         self.send_count = 0;
         self.recv_count = 0;
         self.dh_remote_public = their_new_public;
 
-        // Receiving chain: DH(our current secret, their new public)
+        // Decapsulate PQ ciphertext if present and we have our PQ secret
+        let pq_recv_ss = match (pq_ciphertext, &self.pq_self_secret) {
+            (Some(ct_bytes), Some(dk)) => {
+                let ct = crate::crypto::pq::MlKem768Ciphertext(ct_bytes.to_vec());
+                let ss = crate::crypto::pq::MlKem768::decapsulate(dk, &ct)?;
+                Some(ss.0)
+            }
+            _ => None,
+        };
+
+        // Receiving chain: DH(our current secret, their new public) [+ PQ decaps secret]
         let dh_recv = StaticSecret::from(self.dh_self_secret)
             .diffie_hellman(&PublicKey::from(their_new_public));
-        let (rk2, recv_ck) = kdf_rk(&self.root_key, dh_recv.as_bytes());
+        let (rk2, recv_ck) = kdf_rk_hybrid(
+            &self.root_key,
+            dh_recv.as_bytes(),
+            pq_recv_ss.as_ref().map(|s| s.as_slice()),
+        );
+
+        // Update remote PQ public key if they advertised one
+        if let Some(pq_bytes) = their_new_pq_public {
+            self.pq_remote_public = Some(crate::crypto::pq::MlKem768PublicKey(pq_bytes.to_vec()));
+            self.pq_enabled = true;
+        }
 
         // Generate new DH ratchet key for sending
         let new_secret = StaticSecret::random_from_rng(rand::rngs::OsRng);
         let new_public = PublicKey::from(&new_secret).to_bytes();
 
-        // Sending chain: DH(new secret, their new public)
+        // If PQ is enabled and we have remote PQ key, encapsulate and generate new PQ keypair
+        let (pending_ct, pending_pub, pq_send_ss) = if self.pq_enabled {
+            if let Some(ref remote_pq) = self.pq_remote_public {
+                let (ct, ss) = crate::crypto::pq::MlKem768::encapsulate(remote_pq)?;
+                let (new_pq_pub, new_pq_sec) = crate::crypto::pq::MlKem768::keygen()?;
+                self.pq_self_secret = Some(new_pq_sec);
+                self.pq_self_public = Some(new_pq_pub.clone());
+                (Some(ct.0), Some(new_pq_pub.0), Some(ss.0))
+            } else {
+                (None, None, None)
+            }
+        } else {
+            (None, None, None)
+        };
+
+        self.current_pq_ciphertext = pending_ct;
+        self.current_pq_public = pending_pub;
+
+        // Sending chain: DH(new secret, their new public) [+ PQ encaps secret]
         let dh_send = new_secret.diffie_hellman(&PublicKey::from(their_new_public));
-        let (rk3, send_ck) = kdf_rk(&rk2, dh_send.as_bytes());
+        let (rk3, send_ck) = kdf_rk_hybrid(
+            &rk2,
+            dh_send.as_bytes(),
+            pq_send_ss.as_ref().map(|s| s.as_slice()),
+        );
 
         self.root_key = rk3;
         self.receiving_chain_key = recv_ck;
@@ -329,7 +452,29 @@ impl RatchetState {
 // KDF helpers
 // ────────────────────────────────────────────────────────────────────────────
 
-/// Root KDF: given root key and DH output, produce (new_root_key, chain_key).
+/// Root KDF: given root key and DH output (+ optional PQ shared secret), produce (new_root_key, chain_key).
+fn kdf_rk_hybrid(
+    root_key: &[u8; 32],
+    dh_output: &[u8],
+    pq_shared_secret: Option<&[u8]>,
+) -> ([u8; 32], [u8; 32]) {
+    if let Some(pq_ss) = pq_shared_secret {
+        let mut ikm = Vec::with_capacity(dh_output.len() + pq_ss.len());
+        ikm.extend_from_slice(dh_output);
+        ikm.extend_from_slice(pq_ss);
+        let mut out = [0u8; 64];
+        hkdf_derive_64(root_key, Some(&ikm), PQ_ROOT_KDF_INFO, &mut out);
+        let mut rk = [0u8; 32];
+        let mut ck = [0u8; 32];
+        rk.copy_from_slice(&out[..32]);
+        ck.copy_from_slice(&out[32..]);
+        (rk, ck)
+    } else {
+        kdf_rk(root_key, dh_output)
+    }
+}
+
+/// Root KDF (classical): given root key and DH output, produce (new_root_key, chain_key).
 fn kdf_rk(root_key: &[u8; 32], dh_output: &[u8]) -> ([u8; 32], [u8; 32]) {
     let mut out = [0u8; 64];
     hkdf_derive_64(root_key, Some(dh_output), ROOT_KDF_INFO, &mut out);
@@ -341,15 +486,9 @@ fn kdf_rk(root_key: &[u8; 32], dh_output: &[u8]) -> ([u8; 32], [u8; 32]) {
 }
 
 /// Chain KDF: given chain key, produce (new_chain_key, message_key).
-///
-/// Per Signal Double Ratchet §2.2, the chain key is used as the HKDF **IKM**
-/// (input key material), not as the salt.  Previously chain_key was passed as
-/// salt with ikm=[], which is not wrong cryptographically but diverges from the
-/// spec and confuses external reviewers.  Fixed: chain_key → IKM, salt=&[] (КРИТ-2).
 fn kdf_ck(chain_key: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
     let mut new_ck = [0u8; 32];
     let mut mk = [0u8; 32];
-    // Pass chain_key as IKM (not salt) to match the Signal spec.
     hkdf_derive(&[], Some(chain_key.as_slice()), CHAIN_KDF_INFO, &mut new_ck);
     hkdf_derive(&[], Some(chain_key.as_slice()), MSG_KDF_INFO, &mut mk);
     (new_ck, mk)
@@ -359,16 +498,23 @@ fn hkdf_derive_64(salt: &[u8], ikm: Option<&[u8]>, info: &[u8], out: &mut [u8; 6
     use hkdf::Hkdf;
     use sha2::Sha256;
     let h = Hkdf::<Sha256>::new(Some(salt), ikm.unwrap_or(&[]));
-    // 64 ≤ 8160 — expand with a 64-byte fixed-size buffer is infallible.
     let _ = h.expand(info, out.as_mut_slice());
 }
 
 /// Serialise a `MessageHeader` into bytes for use as AEAD additional data.
 fn header_aad(h: &MessageHeader) -> Vec<u8> {
-    let mut b = Vec::with_capacity(32 + 8);
+    let mut b = Vec::with_capacity(32 + 8 + 64);
     b.extend_from_slice(&h.dh_public);
     b.extend_from_slice(&h.prev_chain_len.to_le_bytes());
     b.extend_from_slice(&h.message_number.to_le_bytes());
+    if let Some(pq_pub) = &h.pq_ratchet_public {
+        b.extend_from_slice(b"PQ-PUB:");
+        b.extend_from_slice(pq_pub);
+    }
+    if let Some(pq_ct) = &h.pq_ratchet_ciphertext {
+        b.extend_from_slice(b"PQ-CT:");
+        b.extend_from_slice(pq_ct);
+    }
     b
 }
 
@@ -435,5 +581,44 @@ mod tests {
         // Alice → Bob (another DH ratchet step)
         let enc3 = alice.encrypt(b"How are you?").unwrap();
         assert_eq!(bob.decrypt(&enc3).unwrap(), b"How are you?");
+    }
+
+    #[test]
+    fn hybrid_pq_bidirectional() {
+        use crate::crypto::pq::MlKem768;
+
+        let ss = make_shared_secret();
+        let bob_secret = StaticSecret::random_from_rng(rand::rngs::OsRng);
+        let bob_public = PublicKey::from(&bob_secret).to_bytes();
+
+        let (bob_pq_pub, bob_pq_sec) = MlKem768::keygen().unwrap();
+
+        let mut alice = RatchetState::init_sender_pq(ss, bob_public, Some(bob_pq_pub.clone()));
+        let mut bob = RatchetState::init_receiver_pq(ss, bob_secret.to_bytes(), Some(bob_pq_sec), Some(bob_pq_pub));
+
+        // Alice -> Bob: first message contains PQ public and PQ ciphertext
+        let enc1 = alice.encrypt(b"Hello Bob from Quantum Future!").unwrap();
+        assert!(enc1.header.pq_ratchet_public.is_some());
+        assert!(enc1.header.pq_ratchet_ciphertext.is_some());
+        assert_eq!(bob.decrypt(&enc1).unwrap(), b"Hello Bob from Quantum Future!");
+
+        // Alice -> Bob: consecutive message from same sender carries same ratchet keys for out-of-order delivery
+        let enc1_2 = alice.encrypt(b"Second message in same burst").unwrap();
+        assert_eq!(enc1_2.header.dh_public, enc1.header.dh_public);
+        assert_eq!(enc1_2.header.pq_ratchet_public, enc1.header.pq_ratchet_public);
+        assert_eq!(enc1_2.header.pq_ratchet_ciphertext, enc1.header.pq_ratchet_ciphertext);
+        assert_eq!(bob.decrypt(&enc1_2).unwrap(), b"Second message in same burst");
+
+        // Bob -> Alice: turn in conversation rotates both DH and ML-KEM
+        let enc2 = bob.encrypt(b"Hello Alice! Hybrid PQ Ratchet working!").unwrap();
+        assert!(enc2.header.pq_ratchet_public.is_some());
+        assert!(enc2.header.pq_ratchet_ciphertext.is_some());
+        assert_eq!(alice.decrypt(&enc2).unwrap(), b"Hello Alice! Hybrid PQ Ratchet working!");
+
+        // Alice -> Bob: another turn
+        let enc3 = alice.encrypt(b"Post-quantum forward secrecy confirmed!").unwrap();
+        assert!(enc3.header.pq_ratchet_public.is_some());
+        assert!(enc3.header.pq_ratchet_ciphertext.is_some());
+        assert_eq!(bob.decrypt(&enc3).unwrap(), b"Post-quantum forward secrecy confirmed!");
     }
 }

@@ -1,0 +1,92 @@
+# Архитектура: Постквантовая криптография (PQ) и защита от DPI в ADA Messenger
+
+## 1. Введение и цели
+
+Данный документ описывает реализацию постквантовой криптографии (Post-Quantum Cryptography, PQC) и маскировки сетевого трафика (DPI Morpher) в ADA Messenger.
+
+### Ключевые требования
+1. **Защита от Harvest-Now-Decrypt-Later (HNDL)**: противники, перехватывающие и сохраняющие зашифрованный трафик сегодня, не смогут расшифровать его в будущем с появлением квантовых компьютеров (алгоритм Шора).
+2. **NIST FIPS 203 ML-KEM-768**: использование стандартизированного решёточного механизма инкапсуляции ключей (Category 3 / эквивалент AES-192).
+3. **Бесшовная деривация из Pattern Auth**: постквантовые ключи детерминированно выводятся из мастер-сида графического пароля (Argon2id), не требуя от пользователя дополнительных действий.
+4. **Маскировка DPI (DpiMorpher)**: сокрытие сигнатур протокола от технических средств противодействия угрозам (ТСПУ) и систем глубокого анализа пакетов через мимикрию под TLS 1.3 и дискретное выравнивание размеров (Bucket Padding).
+5. **Сохранение чистоты транспорта**: строго `iroh-only` QUIC-транспорт без использования `libp2p`.
+
+---
+
+## 2. Постквантовая криптография (`ada-core::crypto::pq`)
+
+### 2.1 Выбор алгоритма и параметры
+- **Алгоритм**: NIST FIPS 203 ML-KEM-768 (крейт `fips203`).
+- **Размеры ключей и структур**:
+  - Публичный ключ инкапсуляции ($EK$): **1184 байта**
+  - Секретный ключ декапсуляции ($DK$): **2400 байт** (защищён автоматическим затиранием `ZeroizeOnDrop`)
+  - Шифротекст ($CT$): **1088 байт**
+  - Общий секрет ($SS$): **32 байта**
+
+### 2.2 Детерминированная деривация из графического ключа
+В [ada-core/src/identity.rs](file:///d:/QUADA/ada-core/src/identity.rs):
+```text
+Pattern Auth (16 ячеек x 5 цветов, 85.9 бит энтропии)
+  ↓ Argon2id (64 MiB, t=3, p=1)
+master_seed (32 байта)
+  ├─ HKDF("ada/signing-key/v1")         → Ed25519 Identity Key (32 B)
+  ├─ HKDF("ada/dh-key/v2")              → X25519 Identity Key (32 B)
+  ├─ HKDF("ada/pq-spk-derive/epoch/N")  → 32-байтный seed → ML-KEM-768 Keypair
+  └─ HKDF("ada/db-key/v1")              → SQLCipher Storage Key (32 B)
+```
+
+### 2.3 PQXDH (Post-Quantum Extended Triple Diffie-Hellman)
+В [ada-core/src/crypto/x3dh.rs](file:///d:/QUADA/ada-core/src/crypto/x3dh.rs):
+- `PreKeyBundle` расширен полями:
+  - `pq_spk_public: Option<Vec<u8>>` (ML-KEM-768 EK)
+  - `pq_spk_signature: Option<Vec<u8>>` (Ed25519 подпись над публичным ключом KEM)
+- **Гибридный расчет общего секрета**:
+  $$\text{IKM} = [0\text{xFF}; 32] \parallel \text{DH}_1 \parallel \text{DH}_2 \parallel \text{DH}_3 \parallel [\text{DH}_4] \parallel \text{PQ\_SharedSecret}$$
+  где `PQ_SharedSecret` — результат инкапсуляции/декапсуляции ML-KEM-768.
+- Полученный 32-байтный результат инициализирует Double Ratchet.
+
+### 2.4 Гибридный Double Ratchet (SPQR)
+В [ada-core/src/crypto/ratchet.rs](file:///d:/QUADA/ada-core/src/crypto/ratchet.rs):
+- При каждом асимметричном шаге (смене направления диалога):
+  - Генерируется новая пара ML-KEM-768.
+  - Следующее поколение корневого ключа обновляется с подмешиванием как классического X25519 DH, так и декапсулированного секрета ML-KEM:
+    $$\text{RootKey}_{i+1}, \text{ChainKey}_{i+1} = \text{HKDF}(\text{RootKey}_i, \text{DH\_Out} \parallel \text{PQ\_Out})$$
+- При последовательных сообщениях одного отправителя KEM-ключи повторно не генерируются (работают симметричные KDF-шаги), что предотвращает оверхед по трафику.
+
+---
+
+## 3. Маскировка трафика и обход цензуры (`DpiMorpher`)
+
+В [ada-core/src/network/dpi.rs](file:///d:/QUADA/ada-core/src/network/dpi.rs):
+
+### 3.1 Мимикрия под TLS 1.3 Record
+Каждый фрейм маскируется под запись TLS 1.3 Application Data:
+- Заголовок записи: `0x17 0x03 0x03` (23 = Application Data, 3, 3 = TLS 1.2 legacy version per RFC 8446).
+- 2 байта длины записи (Big-Endian).
+- 16 байт криптографической соли (`OsRng`).
+- Замаскированное тело полезной нагрузки и паддинг.
+
+### 3.2 Дискретное выравнивание размеров (Bucket Padding)
+Для нейтрализации анализа размеров пакетов (Traffic Fingerprinting) размер любого кадра выравнивается по фиксированным корзинам:
+$$\text{BucketSizes} = \{512, 1024, 2048, 3072, 4096, \dots\}$$
+Свободное пространство заполняется криптографическим шумом.
+
+### 3.3 Маскирование потока (HKDF-SHA256 Stream Mask)
+Тело записи маскируется через XOR с псевдослучайной последовательностью, выведенной из мастер-ключа и случайной соли текущего кадра:
+$$\text{Mask} = \text{HKDF-Expand}(\text{PRK} = \text{HKDF-Extract}(\text{Salt}, \text{Key}), \text{"ADA-DPI-TLS-STREAM-v1"}, \text{Length})$$
+
+---
+
+## 4. Графическая аутентификация: 5 цветов и палитра
+
+В [ada-core/src/pattern_auth.rs](file:///d:/QUADA/ada-core/src/pattern_auth.rs), [PatternBoardView.kt (Android)](file:///d:/QUADA/android-app/app/src/main/java/com/ada/messenger/ui/components/PatternBoardView.kt), [PatternBoardView.kt (Desktop)](file:///d:/QUADA/android-app/desktopApp/src/commonMain/kotlin/com/ada/messenger/desktop/ui/components/PatternBoardView.kt):
+
+- Число цветов увеличено с 3 до **5** (`PATTERN_COLORS = 5`).
+- **Сравнение энтропии**:
+  - 3 цвета: $C(64, 16) \times 3^{16} \approx 2.10 \times 10^{22} \approx \mathbf{74.2\text{ бита}}$
+  - 5 цветов: $C(64, 16) \times 5^{16} \approx 7.45 \times 10^{25} \approx \mathbf{85.9\text{ бита}}$
+  - Рост сложности полного перебора: в **3 545 раз** ($+11.8$ бит сырой энтропии).
+- **UX палитры (`PatternColorPalette`)**:
+  - Под сеткой 8×8 отображается палитра из 5 цветов.
+  - **1 тап**: установка выбранного цвета, повторный тап того же цвета — мгновенное стирание, тап другим цветом — мгновенная перекраска.
+  - Устранена проблема 5-кратного циклического кликанья для удаления ячейки.

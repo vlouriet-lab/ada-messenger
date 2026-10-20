@@ -7,7 +7,7 @@
 use crate::crypto::{
     prekeys::PreKeyManager,
     ratchet::{RatchetMessage, RatchetState},
-    x3dh::{x3dh_receive, x3dh_send, PreKeyBundle},
+    x3dh::{pqxdh_receive, x3dh_send, PreKeyBundle},
 };
 use crate::error::{ADAError, Result};
 use crate::identity::{Identity, PeerId};
@@ -69,6 +69,9 @@ pub struct EncryptedWire {
     /// by field position (not name).  Skipping a field shifts all subsequent fields
     /// and causes UnexpectedEof on the receiver side.
     pub target_ik_public: Option<[u8; 32]>,
+    /// Optional post-quantum ML-KEM-768 ciphertext (if initial PQXDH handshake was performed)
+    #[serde(default)]
+    pub pq_ciphertext: Option<Vec<u8>>,
 }
 
 /// Maximum size of a serialised `RatchetMessage` from the network.
@@ -199,7 +202,12 @@ impl SessionManager {
                 .ok_or_else(|| ADAError::Message("No session and no bundle for X3DH".into()))?;
             let alice_ik = StaticSecret::from(self.identity.dh_key.to_bytes());
             let result = x3dh_send(&alice_ik, b, &peer.0)?;
-            let ratchet = RatchetState::init_sender(result.shared_secret, b.spk_public);
+            let their_pq = b
+                .pq_spk_public
+                .as_ref()
+                .map(|bytes| crate::crypto::pq::MlKem768PublicKey(bytes.clone()));
+            let ratchet =
+                RatchetState::init_sender_pq(result.shared_secret, b.spk_public, their_pq);
 
             sessions.insert(
                 key.clone(),
@@ -236,6 +244,7 @@ impl SessionManager {
                 x3dh_ik_public: Some(x25519_dalek::PublicKey::from(&alice_ik).to_bytes()),
                 opk_id_used: result.opk_id_used,
                 target_ik_public,
+                pq_ciphertext: result.pq_ciphertext.clone(),
             });
         }
 
@@ -262,6 +271,7 @@ impl SessionManager {
             x3dh_ik_public: None,
             opk_id_used: None,
             target_ik_public: None,
+            pq_ciphertext: None,
         })
     }
 
@@ -334,11 +344,31 @@ impl SessionManager {
             };
             let bob_spk = StaticSecret::from(*self.identity.spk_secret_bytes());
 
-            let shared_secret =
-                x3dh_receive(&bob_ik, &bob_spk, opk_secret.as_ref(), ik_pub, ek_pub)?;
+            let shared_secret = pqxdh_receive(
+                &bob_ik,
+                &bob_spk,
+                opk_secret.as_ref(),
+                Some(&self.identity.pq_spk_secret()),
+                ik_pub,
+                ek_pub,
+                wire.pq_ciphertext.as_deref(),
+            )?;
 
-            let ratchet =
-                RatchetState::init_receiver(shared_secret, *self.identity.spk_secret_bytes());
+            let (our_pq_sec, our_pq_pub) = if wire.pq_ciphertext.is_some() {
+                (
+                    Some(self.identity.pq_spk_secret()),
+                    Some(self.identity.pq_spk_public()),
+                )
+            } else {
+                (None, None)
+            };
+
+            let ratchet = RatchetState::init_receiver_pq(
+                shared_secret,
+                *self.identity.spk_secret_bytes(),
+                our_pq_sec,
+                our_pq_pub,
+            );
 
             let mut sessions = self.sessions.write();
             sessions.insert(
@@ -444,6 +474,16 @@ impl SessionManager {
     /// Whether a live session exists for the given peer.
     pub fn has_session(&self, peer: &PeerId) -> bool {
         self.sessions.read().contains_key(&peer.to_base64())
+    }
+
+    /// Returns true if an established ratchet session exists with this peer and has hybrid PQ enabled.
+    pub fn is_session_pq(&self, peer: &PeerId) -> bool {
+        let key = peer.to_base64();
+        self.sessions
+            .read()
+            .get(&key)
+            .map(|s| s.ratchet.pq_enabled)
+            .unwrap_or(false)
     }
 
     /// Drop the in-memory ratchet session for a peer (called when re-adding a

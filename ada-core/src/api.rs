@@ -66,6 +66,11 @@ const SYNC_MESSAGES_SCAN_WINDOW: usize = SYNC_MESSAGES_PER_RESPONSE_MAX * 4;
 /// Timeout budget for quick iroh attempt before switching to bridge path.
 const IROH_FAST_FAILOVER_TIMEOUT_MS: u64 = 3_000;
 const BRIDGE_HTTP_MAILBOX_TIMEOUT_SECS: u64 = 15;
+/// Per-request budget when fetching bridge manifests.
+///
+/// Manifests are fetched from every configured operator in one pass, so a single
+/// black-holed operator URL must not be able to stall the manifests that follow it.
+const BRIDGE_MANIFEST_FETCH_TIMEOUT_SECS: u64 = 20;
 
 fn spawn_background_task<F>(task_name: &'static str, future: F)
 where
@@ -172,6 +177,22 @@ pub enum ADAEvent {
     },
     /// A contact's profile was added/updated
     ContactUpdated(PublicBundle),
+    /// A contact presented a different X3DH identity key than the one pinned for it.
+    ///
+    /// The new key is **not** in force: it is held as pending until the user compares
+    /// safety numbers out-of-band and calls
+    /// [`ADACore::accept_contact_key_change`].  Until then messages keep using the
+    /// previously accepted key, so a substituted contact card cannot silently take
+    /// over the conversation.
+    ContactKeyChanged {
+        peer_id: PeerId,
+        /// Safety number for comparison, digits only (60 digits).
+        safety_number: String,
+        /// Whether the **new** key was bound to the peer's Ed25519 identity by a
+        /// valid signature.  `false` means the card is unauthenticated and the
+        /// warning should be treated as serious.
+        ik_authenticated: bool,
+    },
     /// A peer offered a large file via Iroh Blobs.
     /// Call `ADACore::fetch_file_blob(from, hash)` to download the bytes.
     BlobAvailable {
@@ -322,6 +343,8 @@ pub struct ADACore {
     /// blob transfers.  Uses n0's public relay infrastructure on port 443
     /// (stealth HTTPS) with automatic hole-punching for direct P2P.
     iroh: RwLock<Option<Arc<IrohTransport>>>,
+    /// Gossip overlay service for group messaging, key rotation, and call signaling.
+    pub(crate) gossip: RwLock<Option<Arc<crate::network::gossip::AdaGossipService>>>,
 
     // Event channel to UI
     event_tx: mpsc::Sender<ADAEvent>,
@@ -355,10 +378,16 @@ pub struct ADACore {
     /// Peers currently considered online (have a cached iroh QUIC connection).
     /// Updated every maintenance cycle; changes emit PeerOnline/PeerOffline events.
     online_peers: parking_lot::RwLock<std::collections::HashSet<[u8; 32]>>,
-    /// Last verified bridge manifest currently applied to runtime bridge config.
-    bridge_manifest: parking_lot::RwLock<Option<BridgeManifestPayload>>,
-    /// Origin of the currently applied bridge manifest: cache, bootstrap, etc.
-    bridge_manifest_source: parking_lot::RwLock<Option<String>>,
+    /// Every verified bridge manifest currently in force, keyed by the hex of the
+    /// trusted Ed25519 publisher key that signed it.
+    ///
+    /// Manifests are *additive*, not winner-take-all: several independent operators
+    /// may each publish their own signed manifest, and the runtime bridge set is the
+    /// union of all of them. Keying by publisher is what makes that safe — refreshing
+    /// (or retiring bridges in) one operator's manifest can only touch that operator's
+    /// bridges, never bridges contributed by an independent operator.
+    bridge_manifests:
+        parking_lot::RwLock<std::collections::BTreeMap<String, AppliedBridgeManifest>>,
     /// Whether the background bridge listener currently has a live session.
     bridge_listener_connected: std::sync::atomic::AtomicBool,
     /// Last active bridge listener route.
@@ -447,6 +476,67 @@ struct LastTransportOutcome {
     queue_depth: Option<u32>,
     latency_ms: Option<u64>,
     updated_at_ms: u64,
+}
+
+/// One verified bridge manifest in force.
+#[derive(Clone, Debug)]
+struct AppliedBridgeManifest {
+    /// The signed document exactly as received. Kept verbatim because only the
+    /// operator holds the signing key — the cache cannot be re-signed locally.
+    signed: SignedBridgeManifest,
+    payload: BridgeManifestPayload,
+    /// Where it came from: a URL, `cache`, `fronted:<host>`, an import, …
+    source: String,
+    /// Unix milliseconds of the most recent successful application.
+    applied_at_ms: u64,
+}
+
+/// On-disk shape of `bridge_manifest_cache.json`.
+///
+/// Current builds write an array with one signed document per publisher. Files
+/// written by older builds contain a single object and are still accepted.
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum CachedBridgeManifests {
+    Many(Vec<SignedBridgeManifest>),
+    One(SignedBridgeManifest),
+}
+
+/// Persisted trust-on-first-use record for one contact's X3DH identity key.
+///
+/// Stored under `contact.verification.<peer_b64>` in the encrypted KV. The record
+/// is what turns "we saw a key once" into "we would notice if it changed".
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct ContactKeyRecord {
+    /// The X3DH identity key currently in force, hex-encoded.
+    ik_hex: String,
+    /// Whether `ik_hex` was bound to the peer's Ed25519 identity by a valid
+    /// signature when it was accepted.  `false` = TOFU only.
+    ik_authenticated: bool,
+    /// Unix milliseconds when this contact's key was first seen.
+    first_seen_ms: u64,
+    /// Unix milliseconds of the last out-of-band safety-number comparison.
+    #[serde(default)]
+    verified_at_ms: Option<u64>,
+    /// The safety number the user compared at `verified_at_ms` (digits only).
+    #[serde(default)]
+    verified_safety_number: Option<String>,
+    /// A replacement bundle that arrived but has not been accepted by the user.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pending: Option<PublicBundle>,
+}
+
+impl ContactKeyRecord {
+    fn new(bundle: &PublicBundle, ik_authenticated: bool) -> Self {
+        Self {
+            ik_hex: hex::encode(bundle.dh_public),
+            ik_authenticated,
+            first_seen_ms: unix_now_ms(),
+            verified_at_ms: None,
+            verified_safety_number: None,
+            pending: None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -880,6 +970,7 @@ impl ADACore {
             group_call_rooms_by_session: parking_lot::RwLock::new(std::collections::HashMap::new()),
             group_call_session_by_call: parking_lot::RwLock::new(std::collections::HashMap::new()),
             iroh: RwLock::new(None),
+            gossip: RwLock::new(None),
             event_tx,
             event_rx: RwLock::new(Some(event_rx)),
             transfer_rx: RwLock::new(Some(transfer_rx)),
@@ -889,8 +980,7 @@ impl ADACore {
             connection_profile: parking_lot::RwLock::new(connection_profile_init),
             last_transport_outcome: parking_lot::RwLock::new(None),
             online_peers: parking_lot::RwLock::new(std::collections::HashSet::new()),
-            bridge_manifest: parking_lot::RwLock::new(None),
-            bridge_manifest_source: parking_lot::RwLock::new(None),
+            bridge_manifests: parking_lot::RwLock::new(std::collections::BTreeMap::new()),
             bridge_listener_connected: std::sync::atomic::AtomicBool::new(false),
             bridge_listener_route: parking_lot::RwLock::new(None),
             bridge_mailbox_depth: std::sync::atomic::AtomicU32::new(0),
@@ -991,6 +1081,10 @@ impl ADACore {
 
         let _ = core.restore_cached_bridge_manifest().await;
 
+        // Adopt pins for contacts saved before key pinning existed, and warn about
+        // stored bundles that no longer match their pin.
+        core.audit_contact_key_pins();
+
         Ok(core)
     }
 
@@ -1050,9 +1144,34 @@ impl ADACore {
                 );
             }
         }
-        *self.iroh.write().await = Some(Arc::new(transport));
+        let transport_arc = Arc::new(transport);
+        *self.iroh.write().await = Some(transport_arc.clone());
         self.iroh_started
             .store(true, std::sync::atomic::Ordering::Release);
+
+        let (gossip_tx, mut gossip_rx) = mpsc::channel(256);
+        let gossip_service = Arc::new(crate::network::gossip::AdaGossipService::new(
+            transport_arc.gossip.clone(),
+            self.identity.clone(),
+            gossip_tx,
+        ));
+        *self.gossip.write().await = Some(gossip_service.clone());
+
+        let weak_gossip = Arc::downgrade(self);
+        let gossip_task = tokio::spawn(async move {
+            while let Some(envelope) = gossip_rx.recv().await {
+                if let Some(core) = weak_gossip.upgrade() {
+                    core.handle_gossip_envelope(envelope).await;
+                } else {
+                    break;
+                }
+            }
+        });
+        self.tasks.write().await.push(gossip_task);
+
+        for group in self.groups.list_groups() {
+            let _ = self.ensure_group_gossip_subscribed(group.id).await;
+        }
 
         let weak = Arc::downgrade(self);
         let iroh_task = tokio::spawn(async move {
@@ -1212,58 +1331,69 @@ impl ADACore {
                 manifest_urls.len()
             );
             let weak = Arc::downgrade(self);
-            let manifest_bootstrap =
-                tokio::spawn(async move {
-                    // BUG-3 fix: retry manifest fetch with exponential backoff.
-                    // In whitelist-based censorship the manifest URL may only become
-                    // reachable once a bridge is up, or after a short network warm-up.
-                    // Delays: 0 s (immediate), 15 s, 30 s, 60 s, 120 s.
-                    let delays_secs: &[u64] = &[0, 15, 30, 60, 120];
-                    for (attempt, &delay) in delays_secs.iter().enumerate() {
-                        if delay > 0 {
-                            tokio::time::sleep(tokio::time::Duration::from_secs(delay)).await;
-                        }
-                        let Some(core) = weak.upgrade() else {
-                            break;
-                        };
-                        if !core.running.load(std::sync::atomic::Ordering::SeqCst) {
-                            break;
-                        }
+            let manifest_bootstrap = tokio::spawn(async move {
+                // BUG-3 fix: retry manifest fetch with exponential backoff.
+                // In whitelist-based censorship the manifest URL may only become
+                // reachable once a bridge is up, or after a short network warm-up.
+                // Delays: 0 s (immediate), 15 s, 30 s, 60 s, 120 s.
+                let delays_secs: &[u64] = &[0, 15, 30, 60, 120];
+                for (attempt, &delay) in delays_secs.iter().enumerate() {
+                    let Some(core) = weak.upgrade() else {
+                        break;
+                    };
+                    if !core.running.load(std::sync::atomic::Ordering::SeqCst) {
+                        break;
+                    }
+                    // A verified manifest (normally restored from the cache) already
+                    // makes the bridge set usable, so retries beyond the first attempt
+                    // are pointless. The first attempt still runs against a warm cache:
+                    // `fetch_bridge_manifest()` merges every operator it can reach, and
+                    // that is how manifests from *other* operators get discovered.
+                    let manifests_in_force = { core.bridge_manifests.read().len() };
+                    if attempt > 0 && manifests_in_force > 0 {
                         tracing::debug!(
-                            "[startup] manifest bootstrap attempt {} begin for peer_id={} after {}s delay",
-                            attempt + 1,
-                            core.identity.peer_id,
-                            delay
+                            "[manifest] bootstrap: {} manifest(s) already in force, skipping retry",
+                            manifests_in_force
                         );
-                        // Skip if a previous attempt (or cache restore) already populated bridges.
-                        if core.bridge_manifest.read().is_some() {
+                        break;
+                    }
+
+                    if delay > 0 {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(delay)).await;
+                    }
+                    tracing::debug!(
+                        "[startup] manifest bootstrap attempt {} begin for peer_id={} after {}s delay",
+                        attempt + 1,
+                        core.identity.peer_id,
+                        delay
+                    );
+                    match core.fetch_bridge_manifest().await {
+                        Ok(()) => {
+                            tracing::info!(
+                                "[manifest] bootstrap succeeded on attempt {}",
+                                attempt + 1
+                            );
                             break;
                         }
-                        match core.fetch_bridge_manifest().await {
-                            Ok(()) => {
-                                tracing::info!(
-                                    "[manifest] bootstrap succeeded on attempt {}",
-                                    attempt + 1
-                                );
-                                break;
-                            }
-                            Err(error) => {
-                                if attempt + 1 < delays_secs.len() {
-                                    tracing::warn!(
+                        Err(error) => {
+                            if attempt + 1 < delays_secs.len() {
+                                tracing::warn!(
                                     "[manifest] bootstrap attempt {} failed (retry in {} s): {}",
-                                    attempt + 1, delays_secs[attempt + 1], error
+                                    attempt + 1,
+                                    delays_secs[attempt + 1],
+                                    error
                                 );
-                                } else {
-                                    tracing::warn!(
-                                        "[manifest] bootstrap failed after {} attempts: {}",
-                                        attempt + 1,
-                                        error
-                                    );
-                                }
+                            } else {
+                                tracing::warn!(
+                                    "[manifest] bootstrap failed after {} attempts: {}",
+                                    attempt + 1,
+                                    error
+                                );
                             }
                         }
                     }
-                });
+                }
+            });
             self.tasks.write().await.push(manifest_bootstrap);
         }
 
@@ -2232,13 +2362,7 @@ impl ADACore {
 
         let plaintext = bincode::serialize(&msg).map_err(ADAError::Serialization)?;
         let bundle = self.id_store.load_peer_bundle(peer)?;
-        let bundle_ref = bundle.as_ref().map(|b| crate::crypto::x3dh::PreKeyBundle {
-            ik_public: b.dh_public,
-            spk_public: b.spk_public,
-            spk_signature: b.spk_signature.clone(),
-            opk_public: b.opk_public,
-            opk_id: b.opk_id,
-        });
+        let bundle_ref = bundle.as_ref().map(|b| b.to_prekey_bundle());
         let wire = self
             .sessions
             .encrypt_to(peer, &plaintext, bundle_ref.as_ref(), &peer.0)?;
@@ -2291,13 +2415,7 @@ impl ADACore {
         let plaintext = bincode::serialize(&msg).map_err(ADAError::Serialization)?;
 
         let bundle = self.id_store.load_peer_bundle(peer)?;
-        let bundle_ref = bundle.as_ref().map(|b| crate::crypto::x3dh::PreKeyBundle {
-            ik_public: b.dh_public,
-            spk_public: b.spk_public,
-            spk_signature: b.spk_signature.clone(),
-            opk_public: b.opk_public,
-            opk_id: b.opk_id,
-        });
+        let bundle_ref = bundle.as_ref().map(|b| b.to_prekey_bundle());
 
         let wire = self
             .sessions
@@ -2329,13 +2447,7 @@ impl ADACore {
         let plaintext = bincode::serialize(&msg).map_err(ADAError::Serialization)?;
 
         let bundle = self.id_store.load_peer_bundle(peer)?;
-        let bundle_ref = bundle.as_ref().map(|b| crate::crypto::x3dh::PreKeyBundle {
-            ik_public: b.dh_public,
-            spk_public: b.spk_public,
-            spk_signature: b.spk_signature.clone(),
-            opk_public: b.opk_public,
-            opk_id: b.opk_id,
-        });
+        let bundle_ref = bundle.as_ref().map(|b| b.to_prekey_bundle());
 
         let wire = self
             .sessions
@@ -2367,13 +2479,7 @@ impl ADACore {
 
         let plaintext = bincode::serialize(&msg).map_err(ADAError::Serialization)?;
         let bundle = self.id_store.load_peer_bundle(peer)?;
-        let bundle_ref = bundle.as_ref().map(|b| crate::crypto::x3dh::PreKeyBundle {
-            ik_public: b.dh_public,
-            spk_public: b.spk_public,
-            spk_signature: b.spk_signature.clone(),
-            opk_public: b.opk_public,
-            opk_id: b.opk_id,
-        });
+        let bundle_ref = bundle.as_ref().map(|b| b.to_prekey_bundle());
         let wire = self
             .sessions
             .encrypt_to(peer, &plaintext, bundle_ref.as_ref(), &peer.0)?;
@@ -2404,13 +2510,7 @@ impl ADACore {
 
         let plaintext = bincode::serialize(&msg).map_err(ADAError::Serialization)?;
         let bundle = self.id_store.load_peer_bundle(peer)?;
-        let bundle_ref = bundle.as_ref().map(|b| crate::crypto::x3dh::PreKeyBundle {
-            ik_public: b.dh_public,
-            spk_public: b.spk_public,
-            spk_signature: b.spk_signature.clone(),
-            opk_public: b.opk_public,
-            opk_id: b.opk_id,
-        });
+        let bundle_ref = bundle.as_ref().map(|b| b.to_prekey_bundle());
         let wire = self
             .sessions
             .encrypt_to(peer, &plaintext, bundle_ref.as_ref(), &peer.0)?;
@@ -2599,13 +2699,7 @@ impl ADACore {
         let plaintext = bincode::serialize(&msg).map_err(ADAError::Serialization)?;
 
         let bundle = self.id_store.load_peer_bundle(&peer)?;
-        let bundle_ref = bundle.as_ref().map(|b| crate::crypto::x3dh::PreKeyBundle {
-            ik_public: b.dh_public,
-            spk_public: b.spk_public,
-            spk_signature: b.spk_signature.clone(),
-            opk_public: b.opk_public,
-            opk_id: b.opk_id,
-        });
+        let bundle_ref = bundle.as_ref().map(|b| b.to_prekey_bundle());
 
         let wire = self
             .sessions
@@ -2986,30 +3080,97 @@ impl ADACore {
         &self,
         signed_manifest: SignedBridgeManifest,
         payload: BridgeManifestPayload,
+        publisher_key: [u8; 32],
         source: &str,
         persist_cache: bool,
     ) -> Result<()> {
-        let runtime_bridges = payload
-            .bridges
-            .iter()
-            .map(|entry| entry.to_runtime_bridge())
-            .collect::<Result<Vec<_>>>()?;
+        let publisher_hex = hex::encode(publisher_key);
+        {
+            let mut manifests = self.bridge_manifests.write();
+            if let Some(existing) = manifests.get(&publisher_hex) {
+                // Rollback guard: a replayed *older* manifest from a legitimate
+                // publisher must not retire bridges a newer one introduced.
+                if payload.version < existing.payload.version {
+                    tracing::warn!(
+                        "[manifest] ignoring stale manifest from publisher {}: version {} < {}",
+                        publisher_hex,
+                        payload.version,
+                        existing.payload.version
+                    );
+                    return Ok(());
+                }
+            }
+            manifests.insert(
+                publisher_hex.clone(),
+                AppliedBridgeManifest {
+                    signed: signed_manifest,
+                    payload,
+                    source: source.to_string(),
+                    applied_at_ms: unix_now_ms(),
+                },
+            );
+        }
 
-        self.bridges
-            .write()
-            .await
-            .replace_manifest_bridges(runtime_bridges);
-        *self.bridge_manifest.write() = Some(payload);
-        *self.bridge_manifest_source.write() = Some(source.to_string());
+        self.rebuild_manifest_bridges().await?;
 
         if persist_cache {
-            if let Ok(json) = serde_json::to_string_pretty(&signed_manifest) {
+            self.persist_bridge_manifest_cache();
+        }
+
+        let manifests_in_force = { self.bridge_manifests.read().len() };
+        tracing::info!(
+            "[manifest] publisher {} applied from {} ({} manifest(s) in force)",
+            publisher_hex,
+            source,
+            manifests_in_force
+        );
+        Ok(())
+    }
+
+    /// Rebuild the runtime manifest bridges as the union of every manifest in force.
+    ///
+    /// A bridge disappears only when no manifest advertises it any more. Manual and
+    /// builtin bridges are never touched: `replace_manifest_bridges` retires only
+    /// entries whose source is `BridgeSource::Manifest`.
+    async fn rebuild_manifest_bridges(&self) -> Result<()> {
+        let mut union: Vec<BridgeConfig> = {
+            let manifests = self.bridge_manifests.read();
+            let mut collected = Vec::new();
+            for applied in manifests.values() {
+                for entry in &applied.payload.bridges {
+                    collected.push(entry.to_runtime_bridge()?);
+                }
+            }
+            collected
+        };
+        // Ascending priority, so that when two manifests describe the same bridge the
+        // higher-priority declaration is the one that survives the upsert.
+        union.sort_by(|a, b| a.priority.cmp(&b.priority).then_with(|| a.id.cmp(&b.id)));
+
+        self.bridges.write().await.replace_manifest_bridges(union);
+        Ok(())
+    }
+
+    /// Persist every manifest in force to the on-disk bootstrap cache.
+    fn persist_bridge_manifest_cache(&self) {
+        let signed_documents: Vec<SignedBridgeManifest> = {
+            let manifests = self.bridge_manifests.read();
+            manifests
+                .values()
+                .map(|applied| applied.signed.clone())
+                .collect()
+        };
+        if signed_documents.is_empty() {
+            return;
+        }
+
+        match serde_json::to_string_pretty(&signed_documents) {
+            Ok(json) => {
                 let _ = std::fs::create_dir_all(&self.config.storage.data_dir);
                 let _ = std::fs::write(self.bridge_manifest_cache_path(), json);
             }
+            Err(error) => tracing::warn!("[manifest] cache serialisation failed: {}", error),
         }
-
-        Ok(())
     }
 
     async fn install_verified_bridge_manifest(
@@ -3019,9 +3180,15 @@ impl ADACore {
         persist_cache: bool,
     ) -> Result<()> {
         let trusted_keys = self.trusted_manifest_public_keys();
-        let payload = signed_manifest.verify(&trusted_keys)?;
-        self.apply_verified_bridge_manifest(signed_manifest, payload, source, persist_cache)
-            .await
+        let verified = signed_manifest.verify_with_publisher(&trusted_keys)?;
+        self.apply_verified_bridge_manifest(
+            signed_manifest,
+            verified.payload,
+            verified.publisher_key,
+            source,
+            persist_cache,
+        )
+        .await
     }
 
     async fn restore_cached_bridge_manifest(&self) -> Result<()> {
@@ -3030,30 +3197,70 @@ impl ADACore {
             return Ok(());
         }
         let json = std::fs::read_to_string(cache_path)?;
-        let signed_manifest: SignedBridgeManifest = serde_json::from_str(&json)?;
+        // One entry per publisher; a single object means the file predates
+        // multi-operator manifests.
+        let cached = match serde_json::from_str::<CachedBridgeManifests>(&json) {
+            Ok(CachedBridgeManifests::Many(documents)) => documents,
+            Ok(CachedBridgeManifests::One(document)) => vec![document],
+            Err(error) => return Err(ADAError::Json(error)),
+        };
 
-        // GAP-6: Verify and check TTL before applying — stale manifests must not
-        // remain active indefinitely after the operator rotates bridge configs.
         let trusted_keys = self.trusted_manifest_public_keys();
-        let payload = signed_manifest.verify(&trusted_keys)?;
-        if payload.ttl_secs > 0 {
-            let now_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64;
-            if now_ms > payload.issued_at_ms.saturating_add(payload.ttl_secs * 1000) {
-                tracing::warn!(
-                    "[manifest] cached manifest expired (issued_at_ms={}, ttl_secs={}) — skipping cache, fresh fetch required",
-                    payload.issued_at_ms, payload.ttl_secs
-                );
-                return Ok(());
+        let mut dropped = 0usize;
+
+        for signed_manifest in cached {
+            let verified = match signed_manifest.verify_with_publisher(&trusted_keys) {
+                Ok(verified) => verified,
+                Err(error) => {
+                    // Untrusted or tampered entry: drop it but keep the rest, so one
+                    // bad manifest cannot take the whole bridge set down.
+                    tracing::warn!("[manifest] cached manifest rejected: {}", error);
+                    dropped += 1;
+                    continue;
+                }
+            };
+
+            // GAP-6: verify and check TTL before applying — stale manifests must not
+            // remain active indefinitely after the operator rotates bridge configs.
+            let payload = verified.payload;
+            if payload.ttl_secs > 0 {
+                let now_ms = unix_now_ms();
+                if now_ms > payload.issued_at_ms.saturating_add(payload.ttl_secs * 1000) {
+                    tracing::warn!(
+                        "[manifest] cached manifest expired (issued_at_ms={}, ttl_secs={}) — skipping cache, fresh fetch required",
+                        payload.issued_at_ms,
+                        payload.ttl_secs
+                    );
+                    dropped += 1;
+                    continue;
+                }
             }
+
+            self.apply_verified_bridge_manifest(
+                signed_manifest,
+                payload,
+                verified.publisher_key,
+                "cache",
+                false,
+            )
+            .await?;
         }
 
-        self.apply_verified_bridge_manifest(signed_manifest, payload, "cache", false)
-            .await
+        // Rewrite the cache when entries were dropped, so a rejected or expired
+        // manifest is not re-evaluated on every launch.
+        if dropped > 0 {
+            self.persist_bridge_manifest_cache();
+        }
+
+        Ok(())
     }
 
+    /// Fetch and install **every** configured manifest source.
+    ///
+    /// Manifests are additive: each reachable operator contributes its own bridges
+    /// and a failure of one URL (censored, black-holed, misconfigured, or simply
+    /// offline) must not prevent the others from being applied. The call fails only
+    /// when no source could be installed at all.
     pub async fn fetch_bridge_manifest(&self) -> Result<()> {
         let urls = self.manifest_fetch_urls();
         if urls.is_empty() {
@@ -3062,105 +3269,138 @@ impl ADACore {
             ));
         }
 
+        // Bounded per-request budget: with several operators fetched in one pass, an
+        // unreachable operator must not stall every manifest behind it.
         let client = reqwest::Client::builder()
             .use_rustls_tls()
+            .timeout(std::time::Duration::from_secs(
+                BRIDGE_MANIFEST_FETCH_TIMEOUT_SECS,
+            ))
+            .connect_timeout(std::time::Duration::from_secs(
+                BRIDGE_MANIFEST_FETCH_TIMEOUT_SECS,
+            ))
             .build()
             .map_err(|e| ADAError::Bridge(format!("manifest client: {}", e)))?;
 
+        let mut installed = 0usize;
         let mut last_error = None;
 
         for url in &urls {
-            // ── Pass 1: plain HTTPS (works on unrestricted / lightly-filtered networks)
-            let plain_result = async {
-                match client.get(url).send().await {
-                    Ok(response) => match response.error_for_status() {
-                        Ok(ok) => match ok.text().await {
-                            Ok(text) => serde_json::from_str::<SignedBridgeManifest>(&text)
-                                .map_err(ADAError::Json),
-                            Err(e) => Err(ADAError::Bridge(format!("manifest body: {}", e))),
-                        },
-                        Err(e) => Err(ADAError::Bridge(format!("manifest status: {}", e))),
-                    },
-                    Err(e) => Err(ADAError::Bridge(format!("manifest fetch {}: {}", url, e))),
-                }
-            }
-            .await;
-
-            match plain_result {
-                Ok(signed_manifest) => {
-                    if let Err(error) = self
-                        .install_verified_bridge_manifest(signed_manifest, url, true)
-                        .await
-                    {
-                        last_error = Some(error);
-                    } else {
-                        return Ok(());
-                    }
-                }
-                Err(plain_error) => {
-                    tracing::debug!("[manifest] plain HTTPS failed for {}: {}", url, plain_error);
-                    last_error = Some(plain_error);
-
-                    // ── Pass 2: domain-fronted HTTPS (whitelist / SNI-filtered networks).
-                    //    Works when the manifest is hosted on a CDN whose edge domains
-                    //    are in the whitelist (e.g. Cloudflare, Google).
-                    let fronted_ok = false;
-                    for &front_host in crate::bridge::domain_front::CDN_FRONT_HOSTS {
-                        match crate::bridge::domain_front::fetch_url_via_domain_front(
-                            url, front_host,
-                        )
-                        .await
-                        {
-                            Ok(text) => {
-                                match serde_json::from_str::<SignedBridgeManifest>(&text)
-                                    .map_err(ADAError::Json)
-                                {
-                                    Ok(signed_manifest) => {
-                                        let source = format!("fronted:{}", front_host);
-                                        if let Err(error) = self
-                                            .install_verified_bridge_manifest(
-                                                signed_manifest,
-                                                &source,
-                                                true,
-                                            )
-                                            .await
-                                        {
-                                            last_error = Some(error);
-                                        } else {
-                                            tracing::info!(
-                                                "[manifest] bootstrap via domain-front ({}) succeeded for {}",
-                                                front_host, url
-                                            );
-                                            return Ok(());
-                                        }
-                                    }
-                                    Err(e) => {
-                                        tracing::debug!(
-                                            "[manifest] fronted parse error (front={}): {}",
-                                            front_host,
-                                            e
-                                        );
-                                        last_error = Some(e);
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::debug!(
-                                    "[manifest] domain-front failed (front={}): {}",
-                                    front_host,
-                                    e
-                                );
-                            }
-                        }
-                        if fronted_ok {
-                            break;
-                        }
-                    }
+            match self.fetch_manifest_from_source(&client, url).await {
+                Ok(()) => installed += 1,
+                Err(error) => {
+                    tracing::debug!("[manifest] {} failed: {}", url, error);
+                    last_error = Some(error);
                 }
             }
         }
 
-        Err(last_error.unwrap_or_else(|| ADAError::Bridge("no manifest URL succeeded".into())))
+        if installed == 0 {
+            return Err(
+                last_error.unwrap_or_else(|| ADAError::Bridge("no manifest URL succeeded".into()))
+            );
+        }
+
+        if urls.len() > 1 {
+            let manifests_in_force = { self.bridge_manifests.read().len() };
+            tracing::info!(
+                "[manifest] bootstrap applied {} of {} source(s); {} manifest(s) in force",
+                installed,
+                urls.len(),
+                manifests_in_force
+            );
+        }
+        Ok(())
+    }
+
+    /// Install the manifest served by one URL, falling back to domain fronting when
+    /// plain HTTPS is filtered.
+    async fn fetch_manifest_from_source(&self, client: &reqwest::Client, url: &str) -> Result<()> {
+        match Self::get_signed_manifest(client, url).await {
+            Ok(signed_manifest) => {
+                self.install_verified_bridge_manifest(signed_manifest, url, true)
+                    .await
+            }
+            Err(plain_error) => {
+                tracing::debug!("[manifest] plain HTTPS failed for {}: {}", url, plain_error);
+                let mut last_error = plain_error;
+
+                // Domain fronting: works when the manifest is hosted on a CDN whose
+                // edge domains are in the whitelist (e.g. Cloudflare, Google).
+                for &front_host in crate::bridge::domain_front::CDN_FRONT_HOSTS {
+                    let text = match crate::bridge::domain_front::fetch_url_via_domain_front(
+                        url, front_host,
+                    )
+                    .await
+                    {
+                        Ok(text) => text,
+                        Err(error) => {
+                            tracing::debug!(
+                                "[manifest] domain-front failed (front={}): {}",
+                                front_host,
+                                error
+                            );
+                            continue;
+                        }
+                    };
+
+                    let signed_manifest = match serde_json::from_str::<SignedBridgeManifest>(&text)
+                        .map_err(ADAError::Json)
+                    {
+                        Ok(signed_manifest) => signed_manifest,
+                        Err(error) => {
+                            tracing::debug!(
+                                "[manifest] fronted parse error (front={}): {}",
+                                front_host,
+                                error
+                            );
+                            last_error = error;
+                            continue;
+                        }
+                    };
+
+                    match self
+                        .install_verified_bridge_manifest(
+                            signed_manifest,
+                            &format!("fronted:{}", front_host),
+                            true,
+                        )
+                        .await
+                    {
+                        Ok(()) => {
+                            tracing::info!(
+                                "[manifest] bootstrap via domain-front ({}) succeeded for {}",
+                                front_host,
+                                url
+                            );
+                            return Ok(());
+                        }
+                        Err(error) => last_error = error,
+                    }
+                }
+
+                Err(last_error)
+            }
+        }
+    }
+
+    /// GET one manifest URL and parse it as a signed manifest document.
+    async fn get_signed_manifest(
+        client: &reqwest::Client,
+        url: &str,
+    ) -> Result<SignedBridgeManifest> {
+        let response = client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| ADAError::Bridge(format!("manifest fetch {}: {}", url, e)))?
+            .error_for_status()
+            .map_err(|e| ADAError::Bridge(format!("manifest status: {}", e)))?;
+        let text = response
+            .text()
+            .await
+            .map_err(|e| ADAError::Bridge(format!("manifest body: {}", e)))?;
+        serde_json::from_str::<SignedBridgeManifest>(&text).map_err(ADAError::Json)
     }
 
     pub async fn import_bridge_manifest_json(
@@ -3187,9 +3427,15 @@ impl ADACore {
         }
 
         let trusted_keys = self.combined_trusted_manifest_public_keys(extra_key);
-        let payload = signed_manifest.verify(&trusted_keys)?;
-        self.apply_verified_bridge_manifest(signed_manifest, payload, source, true)
-            .await?;
+        let verified = signed_manifest.verify_with_publisher(&trusted_keys)?;
+        self.apply_verified_bridge_manifest(
+            signed_manifest,
+            verified.payload,
+            verified.publisher_key,
+            source,
+            true,
+        )
+        .await?;
 
         if let Some(key) = extra_key {
             if let Err(error) = self.persist_manifest_public_key(key) {
@@ -4124,14 +4370,194 @@ impl ADACore {
             })
             .unwrap_or_default();
 
-        for member_peer in &members {
-            if member_peer == &self.identity.peer_id {
-                continue;
+        let mut broadcasted_via_gossip = false;
+        if let Some(gossip) = self.gossip.read().await.as_ref() {
+            if gossip.is_subscribed(&group_id).await {
+                let payload = crate::network::gossip::GossipPayload::ChatMessage {
+                    ciphertext: wire_bytes.clone(),
+                    sequence_number: 0,
+                };
+                match gossip.broadcast(&group_id, payload).await {
+                    Ok(()) => {
+                        broadcasted_via_gossip = true;
+                        tracing::debug!(
+                            "Group message {} broadcasted via iroh-gossip for group {}",
+                            hex::encode(id),
+                            hex::encode(group_id)
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "iroh-gossip broadcast failed for group {}: {}, falling back to unicast fan-out",
+                            hex::encode(group_id),
+                            e
+                        );
+                    }
+                }
             }
-            self.deliver_wire(member_peer, id, wire_bytes.clone()).await;
+        }
+
+        if !broadcasted_via_gossip {
+            for member_peer in &members {
+                if member_peer == &self.identity.peer_id {
+                    continue;
+                }
+                self.deliver_wire(member_peer, id, wire_bytes.clone()).await;
+            }
         }
 
         Ok(id)
+    }
+
+    /// Subscribes to the gossip overlay topic for the specified group if not already subscribed.
+    pub async fn ensure_group_gossip_subscribed(&self, group_id: [u8; 16]) -> Result<()> {
+        let gossip = self.gossip.read().await.clone();
+        let Some(gossip) = gossip else {
+            return Ok(());
+        };
+        if gossip.is_subscribed(&group_id).await {
+            return Ok(());
+        }
+        let bootstrap_peers: Vec<[u8; 32]> = self
+            .groups
+            .get_group(&group_id)
+            .map(|g| g.members.iter().map(|m| m.peer_id.0).collect())
+            .unwrap_or_default();
+        gossip
+            .subscribe_group(group_id, bootstrap_peers)
+            .await
+            .map_err(|e| ADAError::Network(e.to_string()))
+    }
+
+    /// Dispatches verified gossip envelopes received from the overlay.
+    async fn handle_gossip_envelope(&self, envelope: crate::network::gossip::GossipEnvelope) {
+        match envelope.payload {
+            crate::network::gossip::GossipPayload::ChatMessage { ciphertext, .. } => {
+                if let Ok(wire_env) = bincode::deserialize::<WireEnvelope>(&ciphertext) {
+                    if let WireEnvelope::Group(skm) = wire_env {
+                        self.receive_group_wire(envelope.sender_peer_id, skm).await;
+                    }
+                }
+            }
+            crate::network::gossip::GossipPayload::SenderKeyDistribution { sender_key_bytes, .. } => {
+                if let Ok(dist) = bincode::deserialize::<crate::group::sender_keys::SenderKeyDistribution>(&sender_key_bytes) {
+                    let _ = self.groups.install_peer_key(envelope.group_id, dist);
+                }
+            }
+            crate::network::gossip::GossipPayload::CallSignal(signal) => {
+                self.handle_group_call_signal(envelope.group_id, envelope.sender_peer_id, signal).await;
+            }
+            crate::network::gossip::GossipPayload::Presence { status } => {
+                tracing::debug!(
+                    "Gossip presence for peer {} in group {}: status {}",
+                    hex::encode(envelope.sender_peer_id),
+                    hex::encode(envelope.group_id),
+                    status
+                );
+            }
+        }
+    }
+
+    /// Handles call signaling messages disseminated via gossip.
+    async fn handle_group_call_signal(
+        &self,
+        _group_id: [u8; 16],
+        sender: [u8; 32],
+        signal: crate::network::gossip::GroupCallSignal,
+    ) {
+        use crate::network::gossip::GroupCallSignal;
+        match signal {
+            GroupCallSignal::JoinRequest { call_id } => {
+                if let Some(room) = self.get_group_call_room_for_call(call_id) {
+                    if room.participants.len() >= crate::network::gossip::MAX_GROUP_CALL_PARTICIPANTS {
+                        tracing::warn!(
+                            "Group call {} reached maximum participants limit (6). Rejecting join from {}",
+                            hex::encode(call_id),
+                            hex::encode(sender)
+                        );
+                        return;
+                    }
+                }
+                tracing::info!(
+                    "Group call join request received from {} for call {}",
+                    hex::encode(sender),
+                    hex::encode(call_id)
+                );
+            }
+            GroupCallSignal::Offer { target_peer_id, .. } => {
+                if target_peer_id == self.identity.peer_id.0 {
+                    tracing::info!("[call] Received group call offer from {}", hex::encode(sender));
+                }
+            }
+            GroupCallSignal::Answer { call_id, target_peer_id, sdp } => {
+                if target_peer_id == self.identity.peer_id.0 {
+                    tracing::info!("[call] Received group call answer from {}", hex::encode(sender));
+                    if let Err(e) = self.call_mgr.set_remote_sdp(call_id, sdp.clone()).await {
+                        tracing::warn!("set_remote_sdp failed: {}", e);
+                    } else {
+                        let (has_video, peer) = self
+                            .call_mgr
+                            .active_calls_info()
+                            .await
+                            .into_iter()
+                            .find(|(id, ..)| *id == call_id)
+                            .map(|(_, p, hv, _, _)| (hv, p))
+                            .unwrap_or((false, PeerId(sender)));
+                        let state = crate::media::call::CallState::Active {
+                            started_at: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs(),
+                            has_video,
+                        };
+                        self.calls_connected_total
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let _ = self
+                            .event_tx
+                            .send(ADAEvent::CallStateChanged {
+                                call_id,
+                                peer,
+                                has_video,
+                                state,
+                                answer_sdp: Some(sdp),
+                            })
+                            .await;
+                    }
+                }
+            }
+            GroupCallSignal::IceCandidate { call_id, target_peer_id, candidate, sdp_mid, sdp_mline_index } => {
+                if target_peer_id == self.identity.peer_id.0 {
+                    let _ = self
+                        .event_tx
+                        .send(ADAEvent::IceCandidate {
+                            call_id,
+                            peer: PeerId(sender),
+                            candidate,
+                            sdp_mid,
+                            sdp_mline_index,
+                        })
+                        .await;
+                }
+            }
+            GroupCallSignal::MediaState { call_id, audio_muted, video_muted, screenshare } => {
+                tracing::debug!(
+                    "Group call media state update for peer {} in call {}: audio_muted={}, video_muted={}, screenshare={}",
+                    hex::encode(sender),
+                    hex::encode(call_id),
+                    audio_muted,
+                    video_muted,
+                    screenshare
+                );
+            }
+            GroupCallSignal::Leave { call_id } => {
+                tracing::info!(
+                    "Peer {} left group call {}",
+                    hex::encode(sender),
+                    hex::encode(call_id)
+                );
+            }
+            GroupCallSignal::ParticipantList { .. } => {}
+        }
     }
 
     /// Process an incoming encrypted wire message (called by network layer)
@@ -4407,6 +4833,7 @@ impl ADACore {
 
                     // Join group: installs inviter's key + generates our own sender key
                     let our_dist = self.groups.join_group_and_init(group, inviter_dist);
+                    let _ = self.ensure_group_gossip_subscribed(*group_id).await;
 
                     // Send our distribution back to the inviter
                     if let Ok(accept_bytes) = bincode::serialize(&our_dist) {
@@ -4594,6 +5021,7 @@ impl ADACore {
     pub async fn create_group(&self, name: &str) -> ([u8; 16], String) {
         let (id, _dist) = self.groups.create_group(name);
         let topic = self.groups.group_topic(&id).unwrap_or_default();
+        let _ = self.ensure_group_gossip_subscribed(id).await;
         tracing::info!("Created group '{}' with ID {}", name, hex::encode(id));
         (id, topic)
     }
@@ -5036,8 +5464,11 @@ impl ADACore {
         }
     }
 
-    fn group_call_members(&self, group_id: [u8; 16], has_video: bool) -> Result<Vec<PeerId>> {
-        let max_peers: usize = if has_video { 7 } else { 15 };
+    fn group_call_members(&self, group_id: [u8; 16], _has_video: bool) -> Result<Vec<PeerId>> {
+        // Enforce hard cap of MAX_GROUP_CALL_PARTICIPANTS (6) across all group calls:
+        // 5 remote peers + 1 local peer = 6 total participants.
+        let max_remote_peers: usize =
+            crate::network::gossip::MAX_GROUP_CALL_PARTICIPANTS.saturating_sub(1);
         let my_peer_id = self.identity.peer_id.clone();
         let group = self
             .list_groups()
@@ -5049,7 +5480,7 @@ impl ADACore {
             .into_iter()
             .filter(|member| member.peer_id != my_peer_id)
             .map(|member| member.peer_id)
-            .take(max_peers)
+            .take(max_remote_peers)
             .collect())
     }
 
@@ -5075,6 +5506,9 @@ impl ADACore {
     ) -> Result<[u8; 16]> {
         self.ensure_realtime_capable().await?;
         let participants = self.group_call_room_participants(group_id, has_video)?;
+        if participants.len() > crate::network::gossip::MAX_GROUP_CALL_PARTICIPANTS {
+            return Err(ADAError::Call("Group call participant limit exceeded (maximum 6 participants)".into()));
+        }
 
         if announce_room {
             self.announce_group_call(group_id, session_id, has_video)
@@ -5116,6 +5550,9 @@ impl ADACore {
         has_video: bool,
     ) -> Result<()> {
         let participants = self.group_call_room_participants(group_id, has_video)?;
+        if participants.len() > crate::network::gossip::MAX_GROUP_CALL_PARTICIPANTS {
+            return Err(ADAError::Call("Group call participant limit exceeded (maximum 6 participants)".into()));
+        }
         self.register_group_call_room(group_id, session_id, has_video, participants, &[call_id]);
         Ok(())
     }
@@ -6046,6 +6483,27 @@ impl ADACore {
         self.decrement_bridge_mailbox_depth();
         match bincode::deserialize::<WireEnvelope>(&envelope.wire_bytes) {
             Ok(WireEnvelope::Dm(wire)) => self.receive_encrypted_wire(wire).await,
+            Ok(WireEnvelope::Group(skm)) => {
+                // Group fan-out envelopes travel the bridge/mailbox lane exactly like
+                // DMs: `send_group_message_internal()` fans out per member through
+                // `deliver_wire()`, which may pick the bridge route.
+                //
+                // Until this arm existed, group envelopes were rejected here. The
+                // mailbox listener only acks `Ok(())`, so every group message sent
+                // over a bridge was silently dropped *and* left in the server queue,
+                // to be redelivered on every reconnect until the mailbox filled up.
+                //
+                // Trust model: `envelope.sender` is authenticated by the bridge when
+                // the envelope is submitted (Ed25519 signature over the push
+                // challenge) but, unlike iroh's TLS-authenticated NodeId, it is not
+                // bound to the transport. `receive_group_wire()` therefore still
+                // enforces `skm.sender == envelope.sender` and verifies the identity
+                // signature on the inner `Message` against `msg.sender`, so a forged
+                // sender cannot inject group content — the check is simply no longer
+                // backed by the transport itself.
+                self.receive_group_wire(envelope.sender, skm).await;
+                Ok(())
+            }
             Ok(WireEnvelope::WebRtcProxy(payload)) => {
                 if let Some(proxy) = self.media_proxies.read().get(&PeerId(envelope.sender)) {
                     proxy.deliver_inbound(payload);
@@ -6053,12 +6511,12 @@ impl ADACore {
                 Ok(())
             }
 
-            Ok(other) => Err(ADAError::Bridge(format!(
-                "unsupported bridge-delivered wire envelope: {:?}",
-                other
-            ))),
+            // Envelopes this build cannot decode (unknown or future wire kind) land
+            // here. Return an error so they are NOT acked: an older peer must not
+            // silently consume a message it cannot present. The server-side mailbox
+            // TTL is what stops such envelopes from being redelivered forever.
             Err(error) => Err(ADAError::Bridge(format!(
-                "bridge wire deserialize failed: {}",
+                "bridge wire deserialize failed (not acked): {}",
                 error
             ))),
         }
@@ -6551,6 +7009,14 @@ impl ADACore {
 
     /// Register a known peer's public bundle (from manual contact add)
     pub fn add_contact(self: &Arc<Self>, bundle: PublicBundle) -> Result<()> {
+        // Trust-on-first-use check before anything is written. A bundle whose X3DH
+        // identity key differs from the pinned one is held as pending and the user is
+        // warned, while the previously accepted key stays in force — otherwise a
+        // substituted contact card would silently redirect the conversation.
+        if !self.pin_contact_key(&bundle) {
+            return Ok(());
+        }
+
         let conv_id = crate::messaging::store::ConversationId::Direct(bundle.peer_id.clone());
         let display_name = bundle.display_name.clone();
         let peer_bytes = bundle.peer_id.0;
@@ -6640,6 +7106,304 @@ impl ADACore {
     pub fn get_contact(&self, peer_id_b64: &str) -> Result<Option<PublicBundle>> {
         let peer = PeerId::from_base64(peer_id_b64)?;
         self.id_store.load_peer_bundle(&peer)
+    }
+
+    // =====================================================================
+    // CONTACT KEY VERIFICATION (trust on first use + safety numbers)
+    // =====================================================================
+
+    fn contact_key_kv_key(peer: &PeerId) -> String {
+        format!("contact.verification.{}", peer.to_base64())
+    }
+
+    fn contact_key_record(&self, peer: &PeerId) -> Option<ContactKeyRecord> {
+        self.id_store
+            .kv()
+            .get_json::<ContactKeyRecord>(&Self::contact_key_kv_key(peer))
+            .ok()
+            .flatten()
+    }
+
+    fn save_contact_key_record(&self, peer: &PeerId, record: &ContactKeyRecord) -> Result<()> {
+        self.id_store
+            .kv()
+            .set_json(&Self::contact_key_kv_key(peer), record)
+    }
+
+    /// Safety number for a contact, digits only.  Both sides derive the same value.
+    pub fn safety_number_for(&self, peer: &PeerId) -> String {
+        crate::crypto::verification::safety_number(&self.identity.peer_id, peer).digits()
+    }
+
+    fn emit_contact_key_changed(&self, peer: &PeerId, ik_authenticated: bool) {
+        let event = ADAEvent::ContactKeyChanged {
+            peer_id: peer.clone(),
+            safety_number: self.safety_number_for(peer),
+            ik_authenticated,
+        };
+        let tx = self.event_tx.clone();
+        spawn_background_task("contact-key-changed", async move {
+            let _ = tx.send(event).await;
+        });
+    }
+
+    /// Pin or check a contact's X3DH identity key (trust on first use).
+    ///
+    /// Returns `true` when the caller may install `bundle` as the active bundle for
+    /// this contact.  A `false` return means the bundle carries a different identity
+    /// key than the pinned one: it is held as *pending* and `ContactKeyChanged` is
+    /// emitted, while the previously accepted key stays in force.
+    fn pin_contact_key(&self, bundle: &PublicBundle) -> bool {
+        let peer = &bundle.peer_id;
+        let ik_hex = hex::encode(bundle.dh_public);
+        let authenticated = bundle.ik_binding_verified().unwrap_or(false);
+
+        let Some(mut record) = self.contact_key_record(peer) else {
+            // First contact: trust on first use.
+            let record = ContactKeyRecord::new(bundle, authenticated);
+            if let Err(error) = self.save_contact_key_record(peer, &record) {
+                tracing::warn!("[verification] pin failed for {}: {}", peer, error);
+            }
+            return true;
+        };
+
+        if record.ik_hex == ik_hex {
+            // Same key. Clear a stale pending entry and note the authentication
+            // upgrade from an older, unauthenticated card.
+            let mut dirty = record.pending.take().is_some();
+            if authenticated && !record.ik_authenticated {
+                record.ik_authenticated = true;
+                dirty = true;
+            }
+            if dirty {
+                if let Err(error) = self.save_contact_key_record(peer, &record) {
+                    tracing::warn!("[verification] pin update failed for {}: {}", peer, error);
+                }
+            }
+            return true;
+        }
+
+        tracing::warn!(
+            "[verification] contact {} offered a different identity key (pinned {}, offered {}, authenticated={}) — held as pending",
+            peer,
+            record.ik_hex,
+            ik_hex,
+            authenticated
+        );
+        record.pending = Some(bundle.clone());
+        if let Err(error) = self.save_contact_key_record(peer, &record) {
+            tracing::warn!(
+                "[verification] pending key store failed for {}: {}",
+                peer,
+                error
+            );
+        }
+        self.emit_contact_key_changed(peer, authenticated);
+        false
+    }
+
+    /// Backfill pins for contacts that predate key pinning, and warn when a stored
+    /// bundle no longer matches its pin.
+    fn audit_contact_key_pins(&self) {
+        for bundle in self.id_store.list_peer_bundles() {
+            let peer = bundle.peer_id.clone();
+            let ik_hex = hex::encode(bundle.dh_public);
+            let authenticated = bundle.ik_binding_verified().unwrap_or(false);
+
+            let Some(mut record) = self.contact_key_record(&peer) else {
+                let record = ContactKeyRecord::new(&bundle, authenticated);
+                if let Err(error) = self.save_contact_key_record(&peer, &record) {
+                    tracing::warn!("[verification] backfill failed for {}: {}", peer, error);
+                }
+                continue;
+            };
+
+            if record.ik_hex == ik_hex {
+                if authenticated && !record.ik_authenticated {
+                    record.ik_authenticated = true;
+                    let _ = self.save_contact_key_record(&peer, &record);
+                }
+                continue;
+            }
+
+            tracing::warn!(
+                "[verification] stored bundle for {} does not match its pinned key (pinned {}, stored {}) — held as pending",
+                peer,
+                record.ik_hex,
+                ik_hex
+            );
+            record.pending = Some(bundle);
+            if let Err(error) = self.save_contact_key_record(&peer, &record) {
+                tracing::warn!(
+                    "[verification] pending key store failed for {}: {}",
+                    peer,
+                    error
+                );
+            }
+            self.emit_contact_key_changed(&peer, authenticated);
+        }
+    }
+
+    /// Returns true if the conversation/session with `peer` is post-quantum secured
+    /// (either active hybrid ratchet session is established or contact bundle supports PQXDH).
+    pub fn is_post_quantum(&self, peer: &PeerId) -> bool {
+        if self.sessions.is_session_pq(peer) {
+            return true;
+        }
+        if let Ok(Some(bundle)) = self.id_store.load_peer_bundle(peer) {
+            return bundle.pq_spk_public.is_some();
+        }
+        false
+    }
+
+    /// Verification state of one contact as a JSON object.
+    pub fn get_contact_security_json(&self, peer_id_b64: &str) -> String {
+        let peer = match PeerId::from_base64(peer_id_b64) {
+            Ok(peer) => peer,
+            Err(_) => return "{}".to_string(),
+        };
+
+        let bundle = self.id_store.load_peer_bundle(&peer).ok().flatten();
+        let record = self.contact_key_record(&peer);
+        let safety = crate::crypto::verification::safety_number(&self.identity.peer_id, &peer);
+        let pending = record.as_ref().and_then(|record| record.pending.as_ref());
+
+        let (identity_key, ik_authenticated) = match (&bundle, &record) {
+            (Some(bundle), _) => (
+                hex::encode(bundle.dh_public),
+                bundle.ik_binding_verified().unwrap_or(false),
+            ),
+            (None, Some(record)) => (record.ik_hex.clone(), record.ik_authenticated),
+            (None, None) => (String::new(), false),
+        };
+
+        serde_json::json!({
+            "peer_id": peer.to_base64(),
+            "display_name": bundle
+                .as_ref()
+                .map(|bundle| bundle.display_name.clone())
+                .unwrap_or_default(),
+            "safety_number": safety.digits(),
+            "safety_number_groups": safety.groups(),
+            "safety_number_formatted": safety.formatted(),
+            "identity_key": identity_key,
+            "ik_authenticated": ik_authenticated,
+            "is_post_quantum": self.is_post_quantum(&peer),
+            "pinned": record.is_some(),
+            "verified": record
+                .as_ref()
+                .map(|record| record.verified_at_ms.is_some())
+                .unwrap_or(false),
+            "verified_at_ms": record.as_ref().and_then(|record| record.verified_at_ms),
+            "verified_safety_number": record
+                .as_ref()
+                .and_then(|record| record.verified_safety_number.clone()),
+            "key_changed": pending.is_some(),
+            "pending": pending.map(|pending| serde_json::json!({
+                "identity_key": hex::encode(pending.dh_public),
+                "ik_authenticated": pending.ik_binding_verified().unwrap_or(false),
+                "display_name": pending.display_name,
+            })),
+        })
+        .to_string()
+    }
+
+    /// Verification state of every known contact as a JSON array.
+    pub fn list_contact_security_json(&self) -> String {
+        let items = self
+            .id_store
+            .list_peer_bundles()
+            .iter()
+            .map(|bundle| {
+                serde_json::from_str::<serde_json::Value>(
+                    &self.get_contact_security_json(&bundle.peer_id.to_base64()),
+                )
+                .unwrap_or(serde_json::Value::Null)
+            })
+            .collect::<Vec<_>>();
+        serde_json::Value::Array(items).to_string()
+    }
+
+    /// Record that the user compared safety numbers with this contact out-of-band.
+    pub fn mark_contact_verified(&self, peer_id_b64: &str) -> Result<()> {
+        let peer = PeerId::from_base64(peer_id_b64)?;
+        let bundle = self
+            .id_store
+            .load_peer_bundle(&peer)?
+            .ok_or_else(|| ADAError::Unknown("unknown contact".into()))?;
+
+        let mut record = self.contact_key_record(&peer).unwrap_or_else(|| {
+            ContactKeyRecord::new(&bundle, bundle.ik_binding_verified().unwrap_or(false))
+        });
+        if record.pending.is_some() {
+            return Err(ADAError::Crypto(
+                "cannot verify while a key change is pending: decide on the new key first".into(),
+            ));
+        }
+
+        record.verified_at_ms = Some(unix_now_ms());
+        record.verified_safety_number = Some(self.safety_number_for(&peer));
+        self.save_contact_key_record(&peer, &record)
+    }
+
+    /// Forget a previous safety-number verification.
+    pub fn clear_contact_verified(&self, peer_id_b64: &str) -> Result<()> {
+        let peer = PeerId::from_base64(peer_id_b64)?;
+        if let Some(mut record) = self.contact_key_record(&peer) {
+            record.verified_at_ms = None;
+            record.verified_safety_number = None;
+            self.save_contact_key_record(&peer, &record)?;
+        }
+        Ok(())
+    }
+
+    /// Adopt a pending key change after the user confirmed the new safety number.
+    pub fn accept_contact_key_change(&self, peer_id_b64: &str) -> Result<()> {
+        let peer = PeerId::from_base64(peer_id_b64)?;
+        let mut record = self
+            .contact_key_record(&peer)
+            .ok_or_else(|| ADAError::Unknown("no pinned key for this contact".into()))?;
+        let pending = record
+            .pending
+            .take()
+            .ok_or_else(|| ADAError::Unknown("no pending key change for this contact".into()))?;
+
+        // The identity key changed, so any previous verification is void.
+        record.ik_hex = hex::encode(pending.dh_public);
+        record.ik_authenticated = pending.ik_binding_verified().unwrap_or(false);
+        record.verified_at_ms = None;
+        record.verified_safety_number = None;
+
+        self.id_store.save_peer_bundle(&pending)?;
+        self.messages
+            .upsert_conversation(&ConversationId::Direct(peer.clone()), &pending.display_name);
+        self.save_contact_key_record(&peer, &record)?;
+
+        // The stored ratchet was established against the old key: the next message
+        // must run X3DH afresh or it would keep talking to whoever held that key.
+        self.sessions.clear_session(&peer);
+        if let Err(error) = self.id_store.delete_ratchet_state(&peer) {
+            tracing::warn!(
+                "[verification] failed to drop stale ratchet for {}: {}",
+                peer,
+                error
+            );
+        }
+
+        tracing::info!("[verification] accepted a new identity key for {}", peer);
+        Ok(())
+    }
+
+    /// Drop a pending key change without adopting it.
+    pub fn reject_contact_key_change(&self, peer_id_b64: &str) -> Result<()> {
+        let peer = PeerId::from_base64(peer_id_b64)?;
+        if let Some(mut record) = self.contact_key_record(&peer) {
+            if record.pending.take().is_some() {
+                self.save_contact_key_record(&peer, &record)?;
+                tracing::info!("[verification] rejected the key change for {}", peer);
+            }
+        }
+        Ok(())
     }
 
     /// Mark all messages in a conversation as read (resets unread counter)
@@ -6778,6 +7542,80 @@ impl ADACore {
         .to_string()
     }
 
+    /// JSON description of one applied manifest, keyed by its publisher.
+    fn manifest_entry_json(
+        publisher_hex: &str,
+        applied: &AppliedBridgeManifest,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "publisher_key": publisher_hex,
+            "version": applied.payload.version,
+            "issued_at_ms": applied.payload.issued_at_ms,
+            "ttl_secs": applied.payload.ttl_secs,
+            "bridge_count": applied.payload.bridges.len(),
+            "supports_realtime_calls": applied.payload.supports_realtime_calls,
+            "max_attachment_bytes": applied.payload.max_attachment_bytes,
+            "source": applied.source,
+            "applied_at_ms": applied.applied_at_ms,
+        })
+    }
+
+    /// Per-publisher breakdown of every manifest in force.
+    fn manifest_status_list(&self) -> Vec<serde_json::Value> {
+        let manifests = self.bridge_manifests.read();
+        manifests
+            .iter()
+            .map(|(publisher_hex, applied)| Self::manifest_entry_json(publisher_hex, applied))
+            .collect()
+    }
+
+    /// Aggregate view over every manifest in force, or `None` when no manifest is applied.
+    ///
+    /// Deliberately conservative where a client reads the value as a guarantee: the
+    /// smallest advertised TTL and attachment ceiling win, while
+    /// `supports_realtime_calls` is true when *any* operator supports it.
+    fn aggregate_manifest_json(&self) -> Option<serde_json::Value> {
+        let manifests = self.bridge_manifests.read();
+        if manifests.is_empty() {
+            return None;
+        }
+
+        let mut version = 0u64;
+        let mut issued_at_ms = 0u64;
+        let mut ttl_secs = u64::MAX;
+        let mut bridge_count = 0usize;
+        let mut supports_realtime_calls = false;
+        let mut max_attachment_bytes: Option<u64> = None;
+        let mut sources: Vec<&str> = Vec::with_capacity(manifests.len());
+        let mut applied_at_ms = 0u64;
+
+        for applied in manifests.values() {
+            version = version.max(applied.payload.version);
+            issued_at_ms = issued_at_ms.max(applied.payload.issued_at_ms);
+            ttl_secs = ttl_secs.min(applied.payload.ttl_secs);
+            bridge_count += applied.payload.bridges.len();
+            supports_realtime_calls |= applied.payload.supports_realtime_calls;
+            if let Some(bytes) = applied.payload.max_attachment_bytes {
+                max_attachment_bytes =
+                    Some(max_attachment_bytes.map_or(bytes, |current| current.min(bytes)));
+            }
+            sources.push(applied.source.as_str());
+            applied_at_ms = applied_at_ms.max(applied.applied_at_ms);
+        }
+
+        Some(serde_json::json!({
+            "count": manifests.len(),
+            "version": version,
+            "issued_at_ms": issued_at_ms,
+            "ttl_secs": ttl_secs,
+            "bridge_count": bridge_count,
+            "supports_realtime_calls": supports_realtime_calls,
+            "max_attachment_bytes": max_attachment_bytes,
+            "source": sources.join(","),
+            "applied_at_ms": applied_at_ms,
+        }))
+    }
+
     /// Get bridge list plus current runtime transport state as a JSON string.
     pub async fn get_bridge_status_json(&self) -> String {
         let bridges = self.bridges.read().await;
@@ -6785,6 +7623,7 @@ impl ADACore {
             ObfuscationMode::None => "none",
             ObfuscationMode::RandomPadding { .. } => "padding",
             ObfuscationMode::TrafficShaping { .. } => "shaping",
+            ObfuscationMode::TlsMorpher { .. } => "tlsmorpher",
             ObfuscationMode::WebSocketTLS { .. } => "websocket",
             ObfuscationMode::DomainFronting { .. } => "fronting",
             ObfuscationMode::Auto => "auto",
@@ -6793,8 +7632,9 @@ impl ADACore {
         let relay_only = self.relay_only_enabled();
         let last_outcome = self.last_transport_outcome.read().clone();
         let capabilities = self.current_route_capabilities().await;
-        let manifest = self.bridge_manifest.read().clone();
-        let manifest_source = self.bridge_manifest_source.read().clone();
+        let manifest = self.aggregate_manifest_json();
+        let manifests = self.manifest_status_list();
+        let manifest_count = manifests.len();
         let listener_connected = self
             .bridge_listener_connected
             .load(std::sync::atomic::Ordering::Acquire);
@@ -6924,15 +7764,12 @@ impl ADACore {
                 "large_attachments": capabilities.large_attachments,
                 "max_attachment_bytes": capabilities.max_attachment_bytes,
             },
-            "manifest": manifest.as_ref().map(|m| serde_json::json!({
-                "version": m.version,
-                "issued_at_ms": m.issued_at_ms,
-                "ttl_secs": m.ttl_secs,
-                "bridge_count": m.bridges.len(),
-                "supports_realtime_calls": m.supports_realtime_calls,
-                "max_attachment_bytes": m.max_attachment_bytes,
-                "source": manifest_source,
-            })),
+            // `manifest` keeps the shape clients already parse: the conservative
+            // aggregate over every manifest in force. `manifests` is the per-operator
+            // breakdown that shows a federated bridge set.
+            "manifest": manifest,
+            "manifests": manifests,
+            "manifest_count": manifest_count,
             "last_outcome": last_outcome.as_ref().map(|o| serde_json::json!({
                 "message_id": hex::encode(o.message_id),
                 "route": o.route,
@@ -7087,6 +7924,9 @@ impl ADACore {
             "padding" => ObfuscationMode::RandomPadding { max_padding: 256 },
             "shaping" => ObfuscationMode::TrafficShaping {
                 target_rate_bps: 100_000,
+            },
+            "tlsmorpher" | "morpher" => ObfuscationMode::TlsMorpher {
+                passphrase: "ada-default-morpher-passphrase".to_string(),
             },
             "websocket" => ObfuscationMode::WebSocketTLS {
                 hostname: "cdn.cloudflare.com".to_string(),
@@ -7617,6 +8457,710 @@ mod tests {
         let conversations = core.messages.list_conversations();
         assert_eq!(conversations.len(), 1);
         assert_eq!(conversations[0].unread_count, 0);
+    }
+
+    /// A group envelope handed over by the bridge/mailbox lane must be accepted.
+    ///
+    /// Regression: `handle_bridge_delivery()` only routed `Dm` and `WebRtcProxy`
+    /// and returned `Err` for `Group`. Because the mailbox listener acks only
+    /// `Ok(())`, every group message sent over a bridge was dropped on the floor
+    /// *and* kept in the server queue, to be redelivered on each reconnect.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn bridge_delivered_group_envelope_is_delivered_and_acked() {
+        let alice_dir = tempfile::tempdir().expect("alice temp dir should be created");
+        let bob_dir = tempfile::tempdir().expect("bob temp dir should be created");
+
+        let mut alice_cfg = ADAConfig::default();
+        alice_cfg.storage.data_dir = alice_dir
+            .path()
+            .join("alice")
+            .to_string_lossy()
+            .into_owned();
+        let mut bob_cfg = ADAConfig::default();
+        bob_cfg.storage.data_dir = bob_dir.path().join("bob").to_string_lossy().into_owned();
+
+        let alice = ADACore::new(alice_cfg, "Alice")
+            .await
+            .expect("alice core should initialize");
+        let bob = ADACore::new(bob_cfg, "Bob")
+            .await
+            .expect("bob core should initialize");
+
+        // Mirror the GroupInvite / GroupJoinAccept handshake at the manager level.
+        let (gid, _topic) = alice.create_group("team").await;
+        let alice_dist = alice
+            .groups
+            .our_distribution(gid)
+            .expect("alice should hold a sender key for the group she created");
+        let mut group = crate::group::types::Group::new("team", alice.identity.peer_id.clone());
+        group.id = gid;
+        let bob_dist = bob.groups.join_group_and_init(group, alice_dist.clone());
+        alice
+            .groups
+            .install_peer_key(gid, bob_dist)
+            .expect("alice should install bob's sender key");
+        bob.groups
+            .install_peer_key(gid, alice_dist)
+            .expect("bob should install alice's sender key");
+
+        // Alice produces a real group message and we hand Bob exactly the envelope
+        // the bridge would have delivered — no iroh, no DNS, pure mailbox path.
+        let mut msg = Message::for_group(
+            alice.identity.peer_id.clone(),
+            gid,
+            MessageKind::Text("hello group".into()),
+        );
+        msg.signature = alice.identity.sign(&msg.bytes_to_sign());
+        let plaintext = bincode::serialize(&msg).expect("group plaintext should serialize");
+        let skm = alice
+            .groups
+            .encrypt_group_message(gid, &plaintext)
+            .expect("alice should encrypt for the group");
+
+        let envelope = BridgeEnvelope {
+            message_id: msg.id,
+            sender: alice.identity.peer_id.0,
+            recipient: bob.identity.peer_id.0,
+            lane: BridgeDeliveryLane::TextDm,
+            wire_bytes: bincode::serialize(&WireEnvelope::Group(skm))
+                .expect("group envelope should serialize"),
+            created_at_ms: 1,
+            expires_at: crate::network::relay::next_offline_expiry_ts(),
+        };
+
+        bob.handle_bridge_delivery(envelope)
+            .await
+            .expect("bridge-delivered group envelope must be accepted so it gets acked");
+
+        let stored = bob
+            .messages
+            .get_message_by_id(&msg.id)
+            .expect("bridge-delivered group message must be stored locally");
+        assert!(
+            matches!(stored.status, MessageStatus::Delivered),
+            "bridge-delivered group message must be stored as Delivered"
+        );
+    }
+
+    /// An unverifiable group envelope must be accepted (and therefore acked) but
+    /// must not be stored — otherwise a single undecryptable envelope would be
+    /// redelivered by the mailbox on every reconnect.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn bridge_delivered_unverifiable_group_envelope_is_dropped_safely() {
+        use crate::crypto::symmetric::EncryptedData;
+        use crate::group::sender_keys::SenderKeyMessage;
+
+        let dir = tempfile::tempdir().expect("temp dir should be created");
+        let mut config = ADAConfig::default();
+        config.storage.data_dir = dir.path().join("bob").to_string_lossy().into_owned();
+        let bob = ADACore::new(config, "Bob")
+            .await
+            .expect("core should initialize");
+        let alice = Identity::generate("Alice");
+
+        let bogus = SenderKeyMessage {
+            sender: alice.peer_id.clone(),
+            group_id: [9u8; 16],
+            iteration: 0,
+            ciphertext: EncryptedData {
+                nonce: [0u8; 12],
+                ciphertext: vec![1, 2, 3],
+            },
+            signing_public: [0u8; 32],
+            signature: vec![0u8; 64],
+        };
+        let envelope = BridgeEnvelope {
+            message_id: [0xAA; 16],
+            sender: alice.peer_id.0,
+            recipient: bob.identity.peer_id.0,
+            lane: BridgeDeliveryLane::TextDm,
+            wire_bytes: bincode::serialize(&WireEnvelope::Group(bogus))
+                .expect("envelope should serialize"),
+            created_at_ms: 1,
+            expires_at: crate::network::relay::next_offline_expiry_ts(),
+        };
+
+        bob.handle_bridge_delivery(envelope)
+            .await
+            .expect("undecryptable group envelope must still be acked, not looped");
+
+        assert!(
+            bob.messages.get_message_by_id(&[0xAA; 16]).is_none(),
+            "unverifiable group envelope must not be stored"
+        );
+    }
+
+    // ── Multi-operator (federated) bridge manifests ───────────────────────────
+
+    /// A manifest payload advertising `(bridge id, port)` pairs.
+    ///
+    /// Ports must differ: `BridgeManager::upsert_bridge` treats equal
+    /// address+port+protocol as the same bridge regardless of id.
+    fn manifest_payload(version: u64, bridges: &[(&str, u16)]) -> BridgeManifestPayload {
+        BridgeManifestPayload {
+            version,
+            issued_at_ms: unix_now_ms(),
+            ttl_secs: 3_600,
+            max_attachment_bytes: Some(1_048_576),
+            supports_realtime_calls: true,
+            bridges: bridges
+                .iter()
+                .enumerate()
+                .map(|(index, (id, port))| crate::bridge::ManifestBridgeEntry {
+                    id: (*id).to_string(),
+                    address: "127.0.0.1".to_string(),
+                    port: *port,
+                    protocol: "websocket".to_string(),
+                    hostname: Some("bridge.example".to_string()),
+                    insecure: false,
+                    fingerprint_hex: hex::encode([0x11u8; 32]),
+                    shared_secret_hex: None,
+                    priority: 100 + index as u8,
+                    is_active: true,
+                    front_domain: None,
+                    front_url: None,
+                    wire_format: None,
+                })
+                .collect(),
+        }
+    }
+
+    /// A core whose config trusts `keys` as manifest publishers.
+    async fn core_trusting_manifest_keys(
+        data_dir: std::path::PathBuf,
+        keys: &[&ed25519_dalek::SigningKey],
+    ) -> Arc<ADACore> {
+        let mut config = ADAConfig::default();
+        config.storage.data_dir = data_dir.to_string_lossy().into_owned();
+        config.bridge.manifest_public_keys = keys
+            .iter()
+            .map(|key| hex::encode(key.verifying_key().to_bytes()))
+            .collect();
+        ADACore::new(config, "Alice")
+            .await
+            .expect("core should initialize")
+    }
+
+    async fn manifest_bridge_ids(core: &ADACore) -> Vec<String> {
+        let mut ids = core
+            .bridges
+            .read()
+            .await
+            .bridges()
+            .iter()
+            .filter(|bridge| bridge.source == crate::bridge::BridgeSource::Manifest)
+            .map(|bridge| bridge.id.clone())
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids
+    }
+
+    /// Manifests from independent operators must be additive. Before this was the
+    /// case, `replace_manifest_bridges()` wiped every manifest bridge on each
+    /// apply, so the second operator's manifest silently deleted the first one's
+    /// bridges (and `fetch_bridge_manifest()` returned on the first success, so the
+    /// second manifest was never even requested).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn manifests_from_independent_operators_are_merged() {
+        let operator_a = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let operator_b = ed25519_dalek::SigningKey::from_bytes(&[8u8; 32]);
+        let dir = tempfile::tempdir().expect("temp dir should be created");
+
+        let core =
+            core_trusting_manifest_keys(dir.path().join("data"), &[&operator_a, &operator_b]).await;
+
+        let signed_a = manifest_payload(1, &[("bridge-a", 4401)])
+            .to_signed(&operator_a)
+            .expect("operator A manifest should sign");
+        let signed_b = manifest_payload(1, &[("bridge-b", 4402)])
+            .to_signed(&operator_b)
+            .expect("operator B manifest should sign");
+
+        core.install_verified_bridge_manifest(signed_a, "https://a.example/manifest.json", false)
+            .await
+            .expect("operator A manifest should apply");
+        core.install_verified_bridge_manifest(signed_b, "https://b.example/manifest.json", false)
+            .await
+            .expect("operator B manifest must not evict operator A's bridges");
+
+        assert_eq!(
+            manifest_bridge_ids(&core).await,
+            vec!["bridge-a".to_string(), "bridge-b".to_string()],
+            "both operators' bridges must be in the runtime set"
+        );
+    }
+
+    /// Republishing one operator's manifest may only affect that operator's bridges.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn refreshing_one_manifest_keeps_other_operators_bridges() {
+        let operator_a = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let operator_b = ed25519_dalek::SigningKey::from_bytes(&[8u8; 32]);
+        let dir = tempfile::tempdir().expect("temp dir should be created");
+
+        let core =
+            core_trusting_manifest_keys(dir.path().join("data"), &[&operator_a, &operator_b]).await;
+
+        core.install_verified_bridge_manifest(
+            manifest_payload(1, &[("bridge-a", 4401)])
+                .to_signed(&operator_a)
+                .expect("operator A manifest should sign"),
+            "https://a.example/manifest.json",
+            false,
+        )
+        .await
+        .expect("operator A manifest should apply");
+        core.install_verified_bridge_manifest(
+            manifest_payload(1, &[("bridge-b", 4402)])
+                .to_signed(&operator_b)
+                .expect("operator B manifest should sign"),
+            "https://b.example/manifest.json",
+            false,
+        )
+        .await
+        .expect("operator B manifest should apply");
+
+        // Operator A retires bridge-a and publishes bridge-a2 instead.
+        core.install_verified_bridge_manifest(
+            manifest_payload(2, &[("bridge-a2", 4403)])
+                .to_signed(&operator_a)
+                .expect("operator A v2 manifest should sign"),
+            "https://a.example/manifest.json",
+            false,
+        )
+        .await
+        .expect("operator A v2 manifest should apply");
+
+        assert_eq!(
+            manifest_bridge_ids(&core).await,
+            vec!["bridge-a2".to_string(), "bridge-b".to_string()],
+            "operator A's retired bridge must go, operator B's bridge must stay"
+        );
+    }
+
+    /// A replayed older manifest from a legitimate publisher must not downgrade the
+    /// bridge set (that would let an old, captured manifest retire live bridges).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stale_manifest_does_not_retire_newer_bridges() {
+        let operator_a = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let dir = tempfile::tempdir().expect("temp dir should be created");
+
+        let core = core_trusting_manifest_keys(dir.path().join("data"), &[&operator_a]).await;
+
+        core.install_verified_bridge_manifest(
+            manifest_payload(2, &[("bridge-new", 4401)])
+                .to_signed(&operator_a)
+                .expect("v2 manifest should sign"),
+            "https://a.example/manifest.json",
+            false,
+        )
+        .await
+        .expect("v2 manifest should apply");
+
+        core.install_verified_bridge_manifest(
+            manifest_payload(1, &[("bridge-old", 4402)])
+                .to_signed(&operator_a)
+                .expect("v1 manifest should sign"),
+            "https://a.example/manifest.json",
+            false,
+        )
+        .await
+        .expect("a stale manifest is a no-op, not a failure");
+
+        assert_eq!(
+            manifest_bridge_ids(&core).await,
+            vec!["bridge-new".to_string()],
+            "a stale manifest must not retire bridges introduced by a newer one"
+        );
+    }
+
+    /// Merging manifest bridges must never touch bridges configured by hand.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn manual_bridge_survives_manifest_merge() {
+        let operator_a = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let dir = tempfile::tempdir().expect("temp dir should be created");
+
+        let core = core_trusting_manifest_keys(dir.path().join("data"), &[&operator_a]).await;
+        core.add_bridge(&format!(
+            "websocket 127.0.0.1:4599 fingerprint={} host=manual.example",
+            hex::encode([0x22u8; 32])
+        ))
+        .await
+        .expect("manual bridge line should parse");
+
+        core.install_verified_bridge_manifest(
+            manifest_payload(1, &[("bridge-a", 4401)])
+                .to_signed(&operator_a)
+                .expect("manifest should sign"),
+            "https://a.example/manifest.json",
+            false,
+        )
+        .await
+        .expect("manifest should apply");
+
+        let manual_count = core
+            .bridges
+            .read()
+            .await
+            .bridges()
+            .iter()
+            .filter(|bridge| bridge.source == crate::bridge::BridgeSource::Manual)
+            .count();
+
+        assert_eq!(
+            manual_count, 1,
+            "a manifest update must not remove manually configured bridges"
+        );
+        assert_eq!(
+            manifest_bridge_ids(&core).await,
+            vec!["bridge-a".to_string()]
+        );
+    }
+
+    /// The on-disk cache must carry one document per publisher, and every publisher
+    /// must be restored: the old single-document cache format silently kept only one
+    /// operator's manifest across restarts.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cached_manifests_from_two_operators_restore_together() {
+        let operator_a = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let operator_b = ed25519_dalek::SigningKey::from_bytes(&[8u8; 32]);
+        let dir = tempfile::tempdir().expect("temp dir should be created");
+        let data_dir = dir.path().join("data");
+
+        {
+            let core =
+                core_trusting_manifest_keys(data_dir.clone(), &[&operator_a, &operator_b]).await;
+            core.install_verified_bridge_manifest(
+                manifest_payload(1, &[("bridge-a", 4401)])
+                    .to_signed(&operator_a)
+                    .expect("operator A manifest should sign"),
+                "https://a.example/manifest.json",
+                true,
+            )
+            .await
+            .expect("operator A manifest should apply");
+            core.install_verified_bridge_manifest(
+                manifest_payload(1, &[("bridge-b", 4402)])
+                    .to_signed(&operator_b)
+                    .expect("operator B manifest should sign"),
+                "https://b.example/manifest.json",
+                true,
+            )
+            .await
+            .expect("operator B manifest should apply");
+        }
+
+        // A fresh core on the same data dir restores the cache during construction.
+        let restored = core_trusting_manifest_keys(data_dir, &[&operator_a, &operator_b]).await;
+
+        assert_eq!(
+            manifest_bridge_ids(&restored).await,
+            vec!["bridge-a".to_string(), "bridge-b".to_string()],
+            "every cached publisher must be restored"
+        );
+    }
+
+    // ── Contact key verification (TOFU + safety numbers) ─────────────────────
+
+    async fn core_with_contacts() -> (Arc<ADACore>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("temp dir should be created");
+        let mut config = ADAConfig::default();
+        config.storage.data_dir = dir.path().join("data").to_string_lossy().into_owned();
+        let core = ADACore::new(config, "Alice")
+            .await
+            .expect("core should initialize");
+        (core, dir)
+    }
+
+    /// A contact bundle for `identity`, optionally re-keyed to simulate a
+    /// substituted (or legitimately rotated) X3DH identity key.
+    fn contact_bundle(identity: &Identity, resigned_dh: Option<([u8; 32], bool)>) -> PublicBundle {
+        let mut bundle = identity.public_bundle();
+        if let Some((dh_public, with_signature)) = resigned_dh {
+            bundle.dh_public = dh_public;
+            bundle.ik_signature = with_signature
+                .then(|| crate::crypto::verification::sign_ik(&identity.signing_key, &dh_public));
+        }
+        bundle
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn first_contact_pins_the_identity_key_and_carries_a_binding_signature() {
+        let (core, _dir) = core_with_contacts().await;
+        let bob = Identity::generate("Bob");
+        let bundle = bob.public_bundle();
+
+        assert!(
+            bundle.ik_binding_verified().expect("binding must verify"),
+            "our own bundle must bind dh_public to peer_id"
+        );
+
+        core.add_contact(bundle.clone())
+            .expect("contact import should succeed");
+
+        let record = core
+            .contact_key_record(&bob.peer_id)
+            .expect("first contact must create a pin");
+        assert_eq!(record.ik_hex, hex::encode(bundle.dh_public));
+        assert!(record.ik_authenticated);
+        assert!(record.pending.is_none());
+        assert!(record.verified_at_ms.is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reimporting_the_same_key_is_not_a_key_change() {
+        let (core, _dir) = core_with_contacts().await;
+        let bob = Identity::generate("Bob");
+        let bundle = bob.public_bundle();
+
+        core.add_contact(bundle.clone()).expect("first import");
+        core.add_contact(bundle).expect("second import");
+
+        let record = core
+            .contact_key_record(&bob.peer_id)
+            .expect("pin must exist");
+        assert!(
+            record.pending.is_none(),
+            "a re-import of the same key must not raise a warning"
+        );
+    }
+
+    /// The core guarantee: a substituted key must not take over the conversation.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn changed_key_is_held_as_pending_and_not_applied() {
+        let (core, _dir) = core_with_contacts().await;
+        let bob = Identity::generate("Bob");
+        let original = bob.public_bundle();
+        core.add_contact(original.clone()).expect("first import");
+
+        // Bob "re-keys": same Ed25519 identity, different X3DH identity key. The new
+        // key is properly signed, so this is not a forgery — it is exactly the case
+        // the user has to confirm out-of-band.
+        let rekeyed = contact_bundle(&bob, Some(([0xAB; 32], true)));
+        core.add_contact(rekeyed.clone()).expect("re-import");
+
+        let stored = core
+            .id_store
+            .load_peer_bundle(&bob.peer_id)
+            .expect("lookup")
+            .expect("contact must still be stored");
+        assert_eq!(
+            stored.dh_public, original.dh_public,
+            "the previously accepted key must stay in force until the user confirms"
+        );
+
+        let record = core
+            .contact_key_record(&bob.peer_id)
+            .expect("pin must exist");
+        assert_eq!(record.ik_hex, hex::encode(original.dh_public));
+        let pending = record.pending.expect("the new key must be held as pending");
+        assert_eq!(pending.dh_public, [0xAB; 32]);
+    }
+
+    /// An unsigned swap (no IK binding) is held as pending *and* flagged as
+    /// unauthenticated — this is the man-in-the-middle case.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn unsigned_key_swap_is_pending_and_unauthenticated() {
+        let (core, _dir) = core_with_contacts().await;
+        let bob = Identity::generate("Bob");
+        core.add_contact(bob.public_bundle()).expect("first import");
+
+        let forged = contact_bundle(&bob, Some(([0xCD; 32], false)));
+        assert!(
+            !forged.ik_binding_verified().expect("verdict"),
+            "a bundle without a binding signature must not be treated as authenticated"
+        );
+        core.add_contact(forged).expect("import must not error");
+
+        let record = core
+            .contact_key_record(&bob.peer_id)
+            .expect("pin must exist");
+        let pending = record.pending.expect("forged key must be held as pending");
+        assert!(pending.ik_signature.is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn accepting_a_key_change_replaces_the_pin_and_drops_the_ratchet() {
+        let (core, _dir) = core_with_contacts().await;
+        let bob = Identity::generate("Bob");
+        core.add_contact(bob.public_bundle()).expect("first import");
+
+        let rekeyed = contact_bundle(&bob, Some(([0xAB; 32], true)));
+        core.add_contact(rekeyed).expect("re-import");
+
+        core.accept_contact_key_change(&bob.peer_id.to_base64())
+            .expect("accepting must succeed");
+
+        let stored = core
+            .id_store
+            .load_peer_bundle(&bob.peer_id)
+            .expect("lookup")
+            .expect("contact must be stored");
+        assert_eq!(stored.dh_public, [0xAB; 32]);
+
+        let record = core
+            .contact_key_record(&bob.peer_id)
+            .expect("pin must exist");
+        assert_eq!(record.ik_hex, hex::encode([0xABu8; 32]));
+        assert!(record.pending.is_none(), "pending must be cleared");
+        assert!(
+            record.verified_at_ms.is_none(),
+            "a key change must invalidate a previous verification"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rejecting_a_key_change_keeps_the_old_key() {
+        let (core, _dir) = core_with_contacts().await;
+        let bob = Identity::generate("Bob");
+        let original = bob.public_bundle();
+        core.add_contact(original.clone()).expect("first import");
+        core.add_contact(contact_bundle(&bob, Some(([0xAB; 32], true))))
+            .expect("re-import");
+
+        core.reject_contact_key_change(&bob.peer_id.to_base64())
+            .expect("rejecting must succeed");
+
+        let record = core
+            .contact_key_record(&bob.peer_id)
+            .expect("pin must exist");
+        assert!(record.pending.is_none());
+        assert_eq!(record.ik_hex, hex::encode(original.dh_public));
+
+        let stored = core
+            .id_store
+            .load_peer_bundle(&bob.peer_id)
+            .expect("lookup")
+            .expect("contact must be stored");
+        assert_eq!(stored.dh_public, original.dh_public);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn safety_number_is_reported_and_verification_is_recorded() {
+        let (core, _dir) = core_with_contacts().await;
+        let bob = Identity::generate("Bob");
+        core.add_contact(bob.public_bundle()).expect("import");
+        let peer_b64 = bob.peer_id.to_base64();
+
+        let json: serde_json::Value =
+            serde_json::from_str(&core.get_contact_security_json(&peer_b64)).expect("valid json");
+        let safety_number = json["safety_number"].as_str().expect("safety number");
+        assert_eq!(safety_number.len(), 60);
+        assert!(!json["verified"].as_bool().expect("verified flag"));
+        assert!(!json["key_changed"].as_bool().expect("key_changed flag"));
+
+        // The peer computes the same value from their side.
+        let peer_side =
+            crate::crypto::verification::safety_number(&bob.peer_id, &core.identity.peer_id);
+        assert_eq!(peer_side.digits(), safety_number);
+
+        core.mark_contact_verified(&peer_b64)
+            .expect("marking verified must succeed");
+
+        let json: serde_json::Value =
+            serde_json::from_str(&core.get_contact_security_json(&peer_b64)).expect("valid json");
+        assert!(json["verified"].as_bool().expect("verified flag"));
+        assert_eq!(
+            json["verified_safety_number"].as_str(),
+            Some(safety_number),
+            "the verified value must be recorded"
+        );
+
+        core.clear_contact_verified(&peer_b64)
+            .expect("clearing must succeed");
+        let json: serde_json::Value =
+            serde_json::from_str(&core.get_contact_security_json(&peer_b64)).expect("valid json");
+        assert!(!json["verified"].as_bool().expect("verified flag"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn verification_is_refused_while_a_key_change_is_pending() {
+        let (core, _dir) = core_with_contacts().await;
+        let bob = Identity::generate("Bob");
+        core.add_contact(bob.public_bundle()).expect("import");
+        core.add_contact(contact_bundle(&bob, Some(([0xAB; 32], true))))
+            .expect("re-import");
+
+        let err = core
+            .mark_contact_verified(&bob.peer_id.to_base64())
+            .expect_err("verifying with an undecided key change must be refused");
+
+        assert!(matches!(err, ADAError::Crypto(_)));
+    }
+
+    /// Pins must survive a restart, and a contact saved before pinning existed must
+    /// be adopted rather than reported as a change.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pins_survive_restart_and_backfill_pre_existing_contacts() {
+        let dir = tempfile::tempdir().expect("temp dir should be created");
+        let data_dir = dir.path().join("data");
+        let bob = Identity::generate("Bob");
+        let original = bob.public_bundle();
+
+        {
+            let mut config = ADAConfig::default();
+            config.storage.data_dir = data_dir.to_string_lossy().into_owned();
+            let core = ADACore::new(config, "Alice").await.expect("core");
+            core.add_contact(original.clone()).expect("import");
+        }
+
+        // Simulate a contact that predates pinning: drop the record, keep the bundle.
+        {
+            let mut config = ADAConfig::default();
+            config.storage.data_dir = data_dir.to_string_lossy().into_owned();
+            let core = ADACore::new(config, "Alice").await.expect("core");
+            let peer = bob.peer_id.clone();
+            core.id_store
+                .kv()
+                .delete(&ADACore::contact_key_kv_key(&peer));
+
+            // Re-constructing the core runs the backfill.
+            let mut config = ADAConfig::default();
+            config.storage.data_dir = data_dir.to_string_lossy().into_owned();
+            let restored = ADACore::new(config, "Alice").await.expect("core");
+            let record = restored
+                .contact_key_record(&peer)
+                .expect("backfill must adopt the existing key");
+            assert_eq!(record.ik_hex, hex::encode(original.dh_public));
+            assert!(
+                record.pending.is_none(),
+                "adopting an existing key is not a key change"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn post_quantum_status_reported_and_persisted() {
+        let (core, _dir) = core_with_contacts().await;
+        let bob = Identity::generate("Bob");
+        core.add_contact(bob.public_bundle()).expect("import");
+        let peer_b64 = bob.peer_id.to_base64();
+
+        // 1. Check is_post_quantum direct method
+        assert!(core.is_post_quantum(&bob.peer_id));
+
+        // 2. Check get_contact_security_json contains is_post_quantum: true
+        let json: serde_json::Value =
+            serde_json::from_str(&core.get_contact_security_json(&peer_b64)).expect("valid json");
+        assert_eq!(json["is_post_quantum"], serde_json::Value::Bool(true));
+
+        // 3. Check list_contact_security_json contains is_post_quantum: true
+        let list_json: serde_json::Value =
+            serde_json::from_str(&core.list_contact_security_json()).expect("valid json");
+        let list_arr = list_json.as_array().expect("array");
+        let found = list_arr.iter().any(|item| item["peer_id"] == peer_b64 && item["is_post_quantum"] == true);
+        assert!(found);
+
+        // 4. Classical peer without PQ SPK reports false
+        let mut classical_bundle = bob.public_bundle();
+        classical_bundle.pq_spk_public = None;
+        classical_bundle.pq_spk_signature = None;
+        let classical_peer = Identity::generate("Charlie");
+        classical_bundle.peer_id = classical_peer.peer_id.clone();
+        core.add_contact(classical_bundle).expect("import classical");
+        assert!(!core.is_post_quantum(&classical_peer.peer_id));
+        let c_json: serde_json::Value =
+            serde_json::from_str(&core.get_contact_security_json(&classical_peer.peer_id.to_base64())).expect("valid json");
+        assert_eq!(c_json["is_post_quantum"], serde_json::Value::Bool(false));
     }
 }
 

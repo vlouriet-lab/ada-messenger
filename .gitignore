@@ -9,6 +9,7 @@ android-app/.gradle/
 .idea/
 *.iml
 .vscode/
+.github/copilot-*
 
 # Logs & debug artifacts
 *.log
@@ -52,10 +53,14 @@ signing.properties
 *.txt
 *.b64
 *.jar
+*.exe
 
 # Quasi-release output directories
 android-app/quasi-releases/
 android-app/app/src/quasiRelease/
+releases/
+release-download/
+Постквант/
 
 # UI XML snapshots
 android-app/ui*.xml

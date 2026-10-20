@@ -1,4 +1,4 @@
-﻿package com.ada.messenger.core
+package com.ada.messenger.core
 
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
@@ -14,6 +14,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 private const val TAG = "CallManager"
+private const val MAX_GROUP_CALL_PARTICIPANTS = 6
 
 /**
  * Manages WebRTC call lifecycle: initiating, answering, declining,
@@ -546,6 +547,7 @@ class CallManager(
             .map { it.peerIdB64 }
             .filter { it.isNotBlank() && it != myPeerId }
             .distinct()
+            .take(MAX_GROUP_CALL_PARTICIPANTS - 1)
     }
 
     private suspend fun dialGroupCallParticipants(groupIdHex: String, sessionIdHex: String, hasVideo: Boolean) {

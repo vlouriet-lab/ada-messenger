@@ -71,6 +71,7 @@ fun AdaDesktopApp(
     onCancelWifiLink: () -> Unit,
     onSnapshotPatternSet: (ByteArray) -> Unit,
     onNewUser: () -> Unit,
+    onCreateGroup: ((String) -> Boolean)? = null,
 ) {
     ADAMessengerDesktopTheme(themeMode = state.themeMode) {
         Surface(
@@ -120,6 +121,7 @@ fun AdaDesktopApp(
                     onSaveFile = onSaveFile,
                     onClearSendError = onClearSendError,
                     onClearActionMessage = onClearActionMessage,
+                    onCreateGroup = onCreateGroup ?: { false },
                 )
 
                 else -> AdaHexBackground {

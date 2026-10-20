@@ -1112,6 +1112,7 @@ pub unsafe extern "C" fn ada_set_event_callback(
                     crate::api::ADAEvent::GroupJoined { .. } => 14,
                     crate::api::ADAEvent::ContactUpdated(_) => 15,
                     crate::api::ADAEvent::BlobAvailable { .. } => 16,
+                    crate::api::ADAEvent::ContactKeyChanged { .. } => 17,
                     _ => 0,
                 };
 
@@ -1573,12 +1574,12 @@ fn conversations_to_json(
         .iter()
         .map(|conversation| {
             let preview = conversation_last_message_preview(core, &conversation.id);
-            let id_str = match &conversation.id {
+            let (id_str, is_post_quantum) = match &conversation.id {
                 crate::messaging::store::ConversationId::Direct(peer) => {
-                    format!("d:{}", peer.to_base64())
+                    (format!("d:{}", peer.to_base64()), core.is_post_quantum(peer))
                 }
                 crate::messaging::store::ConversationId::Group(group_id) => {
-                    format!("g:{}", hex::encode(group_id))
+                    (format!("g:{}", hex::encode(group_id)), false)
                 }
             };
 
@@ -1591,6 +1592,7 @@ fn conversations_to_json(
                 "has_messages": preview.has_visible_message,
                 "last_activity_ms": conversation.last_activity_ms,
                 "unread_count": conversation.unread_count,
+                "is_post_quantum": is_post_quantum,
             })
         })
         .collect();
@@ -2304,6 +2306,17 @@ fn event_to_json(event: &crate::api::ADAEvent, core: Option<&crate::api::ADACore
             "peer_id": bundle.peer_id.to_base64(),
             "display_name": bundle.display_name,
             "dh_public": hex::encode(bundle.dh_public),
+            "is_post_quantum": bundle.pq_spk_public.is_some(),
+        }),
+        ADAEvent::ContactKeyChanged {
+            peer_id,
+            safety_number,
+            ik_authenticated,
+        } => serde_json::json!({
+            "type": "ContactKeyChanged",
+            "peer_id": peer_id.to_base64(),
+            "safety_number": safety_number,
+            "ik_authenticated": ik_authenticated,
         }),
         ADAEvent::SendViaLocalMesh { peer, payload } => {
             use base64::Engine;
@@ -3211,8 +3224,158 @@ pub unsafe extern "C" fn ada_get_metrics_snapshot(handle: *const AdaCoreHandle) 
     }
 }
 
-/// Probe the local network and return the detected censorship level as JSON.
-/// Schema: {"level":"None"|"Light"|"Moderate"|"Heavy"|"Extreme"}
+/// Verification state of one contact as JSON.
+///
+/// Reports the safety number to compare out-of-band, whether the pinned identity
+/// key is bound to the peer's Ed25519 identity by a valid signature, whether the
+/// user has verified it, and whether an unconfirmed key change is pending.
+/// Caller must free the returned string with `ada_string_free`.
+///
+/// # Safety: `handle` valid; `peer_id_b64` a valid null-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn ada_get_contact_security_json(
+    handle: *const AdaCoreHandle,
+    peer_id_b64: *const c_char,
+) -> *mut c_char {
+    if handle.is_null() || peer_id_b64.is_null() {
+        return std::ptr::null_mut();
+    }
+    let h = &*handle;
+    let peer = match CStr::from_ptr(peer_id_b64).to_str() {
+        Ok(peer) => peer,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    match CString::new(h.inner.get_contact_security_json(peer)) {
+        Ok(s) => s.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Verification state of every known contact as a JSON array.
+/// Caller must free the returned string with `ada_string_free`.
+///
+/// # Safety: `handle` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn ada_list_contact_security_json(
+    handle: *const AdaCoreHandle,
+) -> *mut c_char {
+    if handle.is_null() {
+        return std::ptr::null_mut();
+    }
+    let h = &*handle;
+    match CString::new(h.inner.list_contact_security_json()) {
+        Ok(s) => s.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Record that the user compared safety numbers with this contact out-of-band.
+///
+/// # Safety: `handle` valid; `peer_id_b64` a valid null-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn ada_mark_contact_verified(
+    handle: *const AdaCoreHandle,
+    peer_id_b64: *const c_char,
+) -> AdaResult {
+    contact_security_action(handle, peer_id_b64, |core, peer| {
+        core.mark_contact_verified(peer)
+    })
+}
+
+/// Forget a previous safety-number verification for a contact.
+///
+/// # Safety: `handle` valid; `peer_id_b64` a valid null-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn ada_clear_contact_verified(
+    handle: *const AdaCoreHandle,
+    peer_id_b64: *const c_char,
+) -> AdaResult {
+    contact_security_action(handle, peer_id_b64, |core, peer| {
+        core.clear_contact_verified(peer)
+    })
+}
+
+/// Adopt a pending identity-key change after the user confirmed the new safety number.
+///
+/// # Safety: `handle` valid; `peer_id_b64` a valid null-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn ada_accept_contact_key_change(
+    handle: *const AdaCoreHandle,
+    peer_id_b64: *const c_char,
+) -> AdaResult {
+    contact_security_action(handle, peer_id_b64, |core, peer| {
+        core.accept_contact_key_change(peer)
+    })
+}
+
+/// Drop a pending identity-key change without adopting it.
+///
+/// # Safety: `handle` valid; `peer_id_b64` a valid null-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn ada_reject_contact_key_change(
+    handle: *const AdaCoreHandle,
+    peer_id_b64: *const c_char,
+) -> AdaResult {
+    contact_security_action(handle, peer_id_b64, |core, peer| {
+        core.reject_contact_key_change(peer)
+    })
+}
+
+/// Returns whether communication with `peer_id_b64` is post-quantum secured (1 for yes, 0 for no).
+///
+/// # Safety: `handle` valid; `peer_id_b64` a valid null-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn ada_is_peer_post_quantum(
+    handle: *const AdaCoreHandle,
+    peer_id_b64: *const c_char,
+) -> c_int {
+    if handle.is_null() || peer_id_b64.is_null() {
+        return 0;
+    }
+    let h = &*handle;
+    let peer_str = match CStr::from_ptr(peer_id_b64).to_str() {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    let peer = match crate::identity::PeerId::from_base64(peer_str) {
+        Ok(p) => p,
+        Err(_) => return 0,
+    };
+    if h.inner.is_post_quantum(&peer) {
+        1
+    } else {
+        0
+    }
+}
+
+/// Shared plumbing for the contact-verification entry points: validate the pointer,
+/// decode the peer id, run the action, and map the outcome onto `AdaResult`.
+///
+/// # Safety
+/// `handle` must be valid and `peer_id_b64` a valid null-terminated UTF-8 string.
+unsafe fn contact_security_action(
+    handle: *const AdaCoreHandle,
+    peer_id_b64: *const c_char,
+    action: impl FnOnce(&crate::api::ADACore, &str) -> crate::error::Result<()>,
+) -> AdaResult {
+    if handle.is_null() || peer_id_b64.is_null() {
+        return AdaResult::InvalidArg;
+    }
+    let h = &*handle;
+    let peer = match CStr::from_ptr(peer_id_b64).to_str() {
+        Ok(peer) => peer,
+        Err(_) => return AdaResult::InvalidArg,
+    };
+    if crate::identity::PeerId::from_base64(peer).is_err() {
+        return AdaResult::InvalidArg;
+    }
+    match action(&h.inner, peer) {
+        Ok(()) => AdaResult::Ok,
+        Err(_) => AdaResult::Error,
+    }
+}
+
+/// Probe the local network and return the detected censorship level as JSON./// Schema: {"level":"None"|"Light"|"Moderate"|"Heavy"|"Extreme"}
 /// Caller must free with `ada_string_free`.
 ///
 /// # Safety: `handle` must be valid.
@@ -3653,6 +3816,8 @@ pub unsafe extern "C" fn ada_add_contact_json(
             spk_signature: spk_signature.clone(),
             opk_public: None,
             opk_id: None,
+            pq_spk_public: None,
+            pq_spk_signature: None,
         };
         if tmp_bundle_for_verify
             .verify_spk_signature(&peer_id_bytes)
@@ -3679,15 +3844,86 @@ pub unsafe extern "C" fn ada_add_contact_json(
         (None, None)
     };
 
+    // Decode optional post-quantum ML-KEM-768 signed pre-key from the card
+    let (pq_spk_public, pq_spk_signature) = if !card.pq_spk.is_empty() && !card.pq_spk_sig.is_empty() {
+        let pq_bytes = match b64.decode(&card.pq_spk) {
+            Ok(b) if b.len() == crate::crypto::pq::ML_KEM_768_EK_LEN => b,
+            _ => {
+                tracing::warn!("ada_add_contact_json: invalid pq_spk length");
+                return AdaResult::InvalidArg;
+            }
+        };
+        let pq_sig = match b64.decode(&card.pq_spk_sig) {
+            Ok(b) if b.len() == 64 => b,
+            _ => {
+                tracing::warn!("ada_add_contact_json: invalid pq_spk_sig length");
+                return AdaResult::InvalidArg;
+            }
+        };
+        if crate::crypto::x3dh::verify_pq_spk_signature(&peer_id_bytes, &pq_bytes, &pq_sig).is_err() {
+            tracing::warn!(
+                "ada_add_contact_json: pq_spk_sig verification failed for peer {}",
+                card.id
+            );
+            return AdaResult::InvalidArg;
+        }
+        (Some(pq_bytes), Some(pq_sig))
+    } else {
+        (None, None)
+    };
+
+    // v4 cards bind the X3DH identity key to the Ed25519 identity.  `spk_sig` alone
+    // is not enough: it covers the signed pre-key, so a rewritten card could swap
+    // `dh_public` with a valid `spk_sig` and conduct a man-in-the-middle.  For v4+
+    // the binding is mandatory; older cards are accepted but stay unauthenticated
+    // (TOFU only), which `get_contact_security_json` reports.
+    let ik_signature: Option<Vec<u8>> = if card.ik_sig.is_empty() {
+        None
+    } else {
+        match b64.decode(&card.ik_sig) {
+            Ok(bytes) if bytes.len() == 64 => Some(bytes),
+            _ => {
+                tracing::warn!(
+                    "ada_add_contact_json: v{} card has a malformed ik_sig",
+                    card.v
+                );
+                return AdaResult::InvalidArg;
+            }
+        }
+    };
+
+    if card.v >= 4 && ik_signature.is_none() {
+        tracing::warn!(
+            "ada_add_contact_json: v{} card is missing ik_sig — the X3DH identity key would be unauthenticated",
+            card.v
+        );
+        return AdaResult::InvalidArg;
+    }
+
+    if let Some(signature) = ik_signature.as_deref() {
+        if crate::crypto::verification::verify_ik_signature(&dh_public, &peer_id_bytes, signature)
+            .is_err()
+        {
+            tracing::warn!(
+                "ada_add_contact_json: ik_sig verification failed for peer {} — identity key substitution rejected",
+                card.id
+            );
+            return AdaResult::InvalidArg;
+        }
+    }
+
     let bundle = crate::identity::PublicBundle {
         peer_id: crate::identity::PeerId(peer_id_bytes),
         dh_public,
         spk_public,
         spk_signature,
+        ik_signature,
         display_name: card.name.clone(),
         opk_public,
         opk_id,
         relay_url: (!card.relay_url.is_empty()).then(|| card.relay_url.clone()),
+        pq_spk_public,
+        pq_spk_signature,
     };
 
     match h.inner.add_contact(bundle) {

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -34,6 +35,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -43,16 +45,40 @@ import androidx.compose.ui.unit.sp
 
 const val BOARD_SIZE = 8
 const val PATTERN_CUBES = 16
-private const val PATTERN_COLORS = 3
+const val PATTERN_COLORS = 5
+
+/**
+ * Returns the theme/accent color for each pattern color index (0 to 4).
+ * 0: Primary
+ * 1: Secondary
+ * 2: Tertiary
+ * 3: Ruby Coral (#FF6E6E)
+ * 4: Emerald Green (#69F0AE)
+ */
+@Composable
+fun getPatternColor(colorIndex: Int?): Color {
+    val colorScheme = MaterialTheme.colorScheme
+    return when (colorIndex) {
+        0    -> colorScheme.primary
+        1    -> colorScheme.secondary
+        2    -> colorScheme.tertiary
+        3    -> Color(0xFFFF6E6E)
+        4    -> Color(0xFF69F0AE)
+        else -> colorScheme.surfaceVariant
+    }
+}
 
 @Composable
 fun PatternBoardView(
     selectedCells: Map<Int, Int>,
     onCellTap: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    activeColor: Int = 0,
+    onColorSelect: ((Int) -> Unit)? = null,
     readOnly: Boolean = false,
     cellSize: Dp = 36.dp,
     showCounter: Boolean = true,
+    showPalette: Boolean = true,
     shakeError: Boolean = false,
 ) {
     val shakeOffset by animateFloatAsState(
@@ -96,10 +122,91 @@ fun PatternBoardView(
             }
         }
 
+        if (showPalette && !readOnly && onColorSelect != null) {
+            Spacer(Modifier.height(8.dp))
+            PatternColorPalette(
+                selectedColor = activeColor,
+                onColorSelect = onColorSelect,
+            )
+        }
+
         if (showCounter) {
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(if (showPalette && onColorSelect != null) 6.dp else 12.dp))
             PatternCounter(count = selectedCells.size, target = PATTERN_CUBES)
         }
+    }
+}
+
+/**
+ * 5-color palette selector for desktop UI.
+ */
+@Composable
+fun PatternColorPalette(
+    selectedColor: Int,
+    onColorSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    Row(
+        modifier = modifier.padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        for (i in 0 until PATTERN_COLORS) {
+            val color = getPatternColor(i)
+            val isSelected = selectedColor == i
+            val scale by animateFloatAsState(
+                targetValue = if (isSelected) 1.25f else 1.0f,
+                animationSpec = spring(dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy),
+                label = "paletteScale-$i"
+            )
+            val borderAlpha by animateFloatAsState(
+                targetValue = if (isSelected) 1f else 0.35f,
+                animationSpec = tween(150),
+                label = "paletteBorder-$i"
+            )
+
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .scale(scale)
+                    .shadow(if (isSelected) 4.dp else 1.dp, RoundedCornerShape(14.dp))
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(color)
+                    .border(
+                        width = if (isSelected) 2.dp else 1.dp,
+                        color = Color.White.copy(alpha = borderAlpha),
+                        shape = RoundedCornerShape(14.dp),
+                    )
+                    .clickable(enabled = enabled) { onColorSelect(i) },
+                contentAlignment = Alignment.Center
+            ) {
+                if (isSelected) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(RoundedCornerShape(3.5.dp))
+                            .background(Color.White)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Palette-based action:
+ * - If cell is empty and count < 16: places activeColor.
+ * - If cell already has activeColor: removes it (toggle off in 1 tap).
+ * - If cell has another color: recolors to activeColor in 1 tap.
+ */
+fun applyCellAction(current: Map<Int, Int>, index: Int, activeColor: Int): Map<Int, Int> {
+    val existing = current[index]
+    return when {
+        existing == null && current.size < PATTERN_CUBES -> current + (index to activeColor)
+        existing == null -> current // limit reached
+        existing == activeColor -> current - index // erase on second tap
+        else -> current + (index to activeColor) // recolor
     }
 }
 
@@ -122,17 +229,11 @@ private fun PatternCell(
     onClick: () -> Unit,
 ) {
     val colorScheme = MaterialTheme.colorScheme
-    val targetBgColor = when (colorIndex) {
-        0 -> colorScheme.primary
-        1 -> colorScheme.secondary
-        2 -> colorScheme.tertiary
-        else -> colorScheme.surfaceVariant
-    }
-    val targetBorderColor = when (colorIndex) {
-        0 -> colorScheme.primary.copy(alpha = 0.7f)
-        1 -> colorScheme.secondary.copy(alpha = 0.7f)
-        2 -> colorScheme.tertiary.copy(alpha = 0.7f)
-        else -> colorScheme.outline.copy(alpha = 0.25f)
+    val targetBgColor = getPatternColor(colorIndex)
+    val targetBorderColor = if (colorIndex != null) {
+        targetBgColor.copy(alpha = 0.7f)
+    } else {
+        colorScheme.outline.copy(alpha = 0.25f)
     }
 
     val bgColor by animateColorAsState(targetValue = targetBgColor, animationSpec = tween(150), label = "cellBg-$index")

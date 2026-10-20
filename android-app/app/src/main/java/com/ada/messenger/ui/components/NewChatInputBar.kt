@@ -1,4 +1,4 @@
-﻿
+
 package com.ada.messenger.ui.components
 
 import android.Manifest
@@ -27,8 +27,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -52,6 +55,10 @@ fun NewChatInputBar(
     recorderHelper: MediaRecorderHelper,
 ) {
     val context = LocalContext.current
+    val density = LocalDensity.current
+    val haptic = LocalHapticFeedback.current
+    val cancelThresholdPx = with(density) { 64.dp.toPx() }
+    val lockThresholdPx = with(density) { 56.dp.toPx() }
     val scope = rememberCoroutineScope()
     var mediaMode by remember { mutableStateOf(MediaMode.VOICE) }
     var recordState by remember { mutableStateOf(RecordState.IDLE) }
@@ -236,7 +243,7 @@ fun NewChatInputBar(
                         }
                     } else {
                         Text(
-                            "< Swipe cancel | ^ Lock",
+                            stringResource(R.string.chat_swipe_cancel_lock_hint),
                             color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.6f),
                             style = MaterialTheme.typography.labelSmall,
                         )
@@ -273,6 +280,7 @@ fun NewChatInputBar(
                                     }
                                 } catch (_: PointerEventTimeoutCancellationException) {
                                     isLongPress = true
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     startRecording()
                                 }
 
@@ -295,11 +303,13 @@ fun NewChatInputBar(
                                         dragY += change.positionChange().y
 
                                         if (!lockedOrCanceled) {
-                                            if (dragX < -100f) {
+                                            if (dragX < -cancelThresholdPx) {
                                                 lockedOrCanceled = true
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                 cancelRecording()
-                                            } else if (dragY < -100f) {
+                                            } else if (dragY < -lockThresholdPx) {
                                                 lockedOrCanceled = true
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                 recordState = RecordState.LOCKED
                                             }
                                         }

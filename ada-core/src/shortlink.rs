@@ -51,8 +51,8 @@ pub const PREFIX: &str = "ada://s/";
 //
 //   offset  len  field
 //   ──────  ───  ──────────────────────────
-//   0       1    card version (2 | 3)
-//   1       1    flags  (bit 0 = has_opk, bit 1 = has_ephemeral_ik)
+//   0       1    card version (2 | 3 | 4)
+//   1       1    flags  (bit 0 = has_opk, bit 1 = has_ephemeral_ik, bit 2 = has_ik_sig)
 //   2       32   peer_id  (Ed25519 VK)
 //   34      32   ik       (X25519 DH pub)
 //   66      32   spk      (X25519 SPK pub)
@@ -61,18 +61,20 @@ pub const PREFIX: &str = "ada://s/";
 //   163     N    name     (UTF-8, N = name_len)
 //   163+N   …    [if has_opk: 32 opk_pub + 4 opk_id(LE)]
 //                [if has_ephemeral_ik: 32 ephemeral_ik]
+//                [if has_ik_sig: 64 ik_sig (Ed25519 sig of the X3DH IK)]
 
 const FLAG_HAS_OPK: u8 = 0x01;
 const FLAG_HAS_EPHEMERAL_IK: u8 = 0x02;
+const FLAG_HAS_IK_SIG: u8 = 0x04;
 
 /// Pack a `PatternContactCard` into compact bytes.
 fn pack_card(card: &crate::pattern_auth::PatternContactCard) -> Option<Vec<u8>> {
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD;
 
-    // Preserve relay_url exactly by falling back to legacy JSON encoding.
-    // The compact binary format currently has no field for it.
-    if !card.relay_url.is_empty() {
+    // Preserve relay_url and PQ keys exactly by falling back to legacy JSON encoding.
+    // The compact binary format currently has no field for them.
+    if !card.relay_url.is_empty() || !card.pq_spk.is_empty() {
         return None;
     }
 
@@ -86,6 +88,11 @@ fn pack_card(card: &crate::pattern_auth::PatternContactCard) -> Option<Vec<u8>> 
 
     let has_opk = !card.opk.is_empty() && !card.opk_id.is_empty();
     let has_eph = !card.ephemeral_ik.is_empty();
+    let ik_sig: Vec<u8> = b64.decode(&card.ik_sig).unwrap_or_default();
+    if !card.ik_sig.is_empty() && ik_sig.len() != 64 {
+        return None;
+    }
+    let has_ik_sig = ik_sig.len() == 64;
 
     let mut flags: u8 = 0;
     if has_opk {
@@ -93,6 +100,9 @@ fn pack_card(card: &crate::pattern_auth::PatternContactCard) -> Option<Vec<u8>> 
     }
     if has_eph {
         flags |= FLAG_HAS_EPHEMERAL_IK;
+    }
+    if has_ik_sig {
+        flags |= FLAG_HAS_IK_SIG;
     }
 
     let name_bytes = card.name.as_bytes();
@@ -108,7 +118,8 @@ fn pack_card(card: &crate::pattern_auth::PatternContactCard) -> Option<Vec<u8>> 
         + 1
         + name_bytes.len()
         + if has_opk { 36 } else { 0 }
-        + if has_eph { 32 } else { 0 };
+        + if has_eph { 32 } else { 0 }
+        + if has_ik_sig { 64 } else { 0 };
 
     let mut buf = Vec::with_capacity(capacity);
     buf.push(card.v);
@@ -129,6 +140,9 @@ fn pack_card(card: &crate::pattern_auth::PatternContactCard) -> Option<Vec<u8>> 
     if has_eph {
         let eph: [u8; 32] = b64.decode(&card.ephemeral_ik).ok()?.try_into().ok()?;
         buf.extend_from_slice(&eph);
+    }
+    if has_ik_sig {
+        buf.extend_from_slice(&ik_sig);
     }
 
     Some(buf)
@@ -176,7 +190,17 @@ fn unpack_card(data: &[u8]) -> Option<crate::pattern_auth::PatternContactCard> {
             return None;
         }
         let eph: [u8; 32] = data[cursor..cursor + 32].try_into().ok()?;
+        cursor += 32;
         b64.encode(eph)
+    } else {
+        String::new()
+    };
+
+    let ik_sig = if flags & FLAG_HAS_IK_SIG != 0 {
+        if data.len() < cursor + 64 {
+            return None;
+        }
+        b64.encode(&data[cursor..cursor + 64])
     } else {
         String::new()
     };
@@ -192,6 +216,9 @@ fn unpack_card(data: &[u8]) -> Option<crate::pattern_auth::PatternContactCard> {
         opk,
         opk_id: opk_id_str,
         ephemeral_ik,
+        ik_sig,
+        pq_spk: String::new(),
+        pq_spk_sig: String::new(),
     })
 }
 
@@ -311,6 +338,29 @@ mod tests {
         let orig: serde_json::Value = serde_json::from_str(&json).unwrap();
         let dec: serde_json::Value = serde_json::from_str(&decoded_json).unwrap();
         assert_eq!(orig, dec);
+    }
+
+    /// The compact (deeplink) encoding must carry the v4 IK binding signature.
+    /// Without it, sharing a contact as `ada://s/...` would silently downgrade the
+    /// contact to TOFU-only and lose the protection that signature provides.
+    #[test]
+    fn compact_round_trip_preserves_ik_signature() {
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let json = format!(
+            r#"{{"v":4,"id":"{}","spk":"{}","ik":"{}","spk_sig":"{}","name":"Alice","ik_sig":"{}"}}"#,
+            b64.encode([0xAA_u8; 32]),
+            b64.encode([0xCC_u8; 32]),
+            b64.encode([0xBB_u8; 32]),
+            b64.encode([0xDD_u8; 64]),
+            b64.encode([0xEE_u8; 64]),
+        );
+
+        let url = encode(&json);
+        let decoded_json = decode(&url).expect("decode must succeed");
+        let orig: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let dec: serde_json::Value = serde_json::from_str(&decoded_json).unwrap();
+
+        assert_eq!(orig, dec, "ik_sig must survive the compact round trip");
     }
 
     #[test]

@@ -92,12 +92,34 @@ pub struct SignedBridgeManifest {
     pub signature_hex: String,
 }
 
+/// A manifest that passed signature verification, plus the identity of the
+/// operator that published it.
+///
+/// The publisher key is the manifest's *identity*: it stays the same when an
+/// operator republishes an updated manifest, which lets callers refresh one
+/// operator's bridges without discarding the bridges contributed by an
+/// independent operator.
+#[derive(Clone, Debug)]
+pub struct VerifiedBridgeManifest {
+    pub payload: BridgeManifestPayload,
+    /// The trusted Ed25519 public key whose signature verified `payload`.
+    pub publisher_key: [u8; 32],
+}
+
 fn default_manifest_bridge_active() -> bool {
     true
 }
 
 impl SignedBridgeManifest {
     pub fn verify(&self, trusted_public_keys: &[[u8; 32]]) -> Result<BridgeManifestPayload> {
+        Ok(self.verify_with_publisher(trusted_public_keys)?.payload)
+    }
+
+    /// Verify the signature and report which trusted key signed the manifest.
+    pub fn verify_with_publisher(
+        &self,
+        trusted_public_keys: &[[u8; 32]],
+    ) -> Result<VerifiedBridgeManifest> {
         if trusted_public_keys.is_empty() {
             return Err(ADAError::Bridge(
                 "no trusted manifest public keys configured".into(),
@@ -112,23 +134,24 @@ impl SignedBridgeManifest {
         let signature = Signature::from_bytes(&sig_arr);
 
         let payload_bytes = self.payload_json.as_bytes();
-        let mut verified = false;
+        let mut publisher_key: Option<[u8; 32]> = None;
         for key_bytes in trusted_public_keys {
             let key = VerifyingKey::from_bytes(key_bytes)
                 .map_err(|_| ADAError::Bridge("invalid trusted manifest public key".into()))?;
             if key.verify(payload_bytes, &signature).is_ok() {
-                verified = true;
+                publisher_key = Some(*key_bytes);
                 break;
             }
         }
-        if !verified {
-            return Err(ADAError::InvalidSignature);
-        }
+        let publisher_key = publisher_key.ok_or(ADAError::InvalidSignature)?;
 
         let payload: BridgeManifestPayload =
             serde_json::from_str(&self.payload_json).map_err(ADAError::Json)?;
         payload.validate()?;
-        Ok(payload)
+        Ok(VerifiedBridgeManifest {
+            payload,
+            publisher_key,
+        })
     }
 }
 
@@ -404,6 +427,32 @@ mod tests {
             .expect_err("manifest should reject unknown signer");
 
         assert!(matches!(err, ADAError::InvalidSignature));
+    }
+
+    /// The manifest's publisher identity is the key that verified it, so a caller
+    /// can key a table of manifests by operator and republish safely.
+    #[test]
+    fn verify_with_publisher_reports_the_signing_key() {
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let other_key = SigningKey::from_bytes(&[8u8; 32]);
+        let trusted = [
+            other_key.verifying_key().to_bytes(),
+            signing_key.verifying_key().to_bytes(),
+        ];
+        let signed = sample_payload()
+            .to_signed(&signing_key)
+            .expect("manifest should sign");
+
+        let verified = signed
+            .verify_with_publisher(&trusted)
+            .expect("manifest should verify against the second trusted key");
+
+        assert_eq!(
+            verified.publisher_key,
+            signing_key.verifying_key().to_bytes(),
+            "publisher key must be the key that actually verified the signature"
+        );
+        assert_eq!(verified.payload.version, sample_payload().version);
     }
 
     #[test]

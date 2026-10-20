@@ -1,5 +1,6 @@
 package com.ada.messenger.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.InfiniteRepeatableSpec
 import androidx.compose.animation.core.RepeatMode
@@ -7,6 +8,10 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,7 +23,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -70,82 +80,102 @@ fun ConnectionStatusBar(
     level: ConnectionLevel,
     modifier: Modifier = Modifier,
     lastOutcome: TransportOutcomeSummary? = null,
+    autoHideWhenGreen: Boolean = true,
 ) {
-    val bg by animateColorAsState(
-        targetValue = when (level) {
-            ConnectionLevel.GREEN  -> GreenBg
-            ConnectionLevel.YELLOW -> YellowBg
-            ConnectionLevel.ORANGE -> OrangeBg
-            ConnectionLevel.RED    -> RedBg
-        },
-        animationSpec = tween(400),
-        label = "conn_bg",
-    )
-    val dot by animateColorAsState(
-        targetValue = when (level) {
-            ConnectionLevel.GREEN  -> GreenDot
-            ConnectionLevel.YELLOW -> YellowDot
-            ConnectionLevel.ORANGE -> OrangeDot
-            ConnectionLevel.RED    -> RedDot
-        },
-        animationSpec = tween(400),
-        label = "conn_dot",
-    )
-    val textColor by animateColorAsState(
-        targetValue = when (level) {
-            ConnectionLevel.GREEN  -> Color(0xFFA5D6A7)
-            ConnectionLevel.YELLOW -> Color(0xFFFFF9C4)
-            ConnectionLevel.ORANGE -> Color(0xFFFFE0B2)
-            ConnectionLevel.RED    -> Color(0xFFFFCDD2)
-        },
-        animationSpec = tween(400),
-        label = "conn_text",
-    )
+    var isVisible by remember { mutableStateOf(level != ConnectionLevel.GREEN) }
 
-    val baseLabel = when (level) {
-        ConnectionLevel.GREEN  -> stringResource(R.string.conn_green)
-        ConnectionLevel.YELLOW -> stringResource(R.string.conn_yellow)
-        ConnectionLevel.ORANGE -> stringResource(R.string.conn_orange)
-        ConnectionLevel.RED    -> stringResource(R.string.conn_red)
-    }
-    val routeLabel = connectionRouteLabelRes(lastOutcome?.route)?.let { stringResource(it) }
-    val label = if (routeLabel != null) {
-        stringResource(R.string.conn_with_route, baseLabel, routeLabel)
-    } else {
-        baseLabel
+    LaunchedEffect(level, lastOutcome, autoHideWhenGreen) {
+        if (level != ConnectionLevel.GREEN) {
+            isVisible = true
+        } else if (autoHideWhenGreen) {
+            delay(3500L)
+            isVisible = false
+        } else {
+            isVisible = true
+        }
     }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.4f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(800),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulse_alpha"
-    )
-
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(bg)
-            .padding(horizontal = 12.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    AnimatedVisibility(
+        visible = isVisible,
+        enter = expandVertically(animationSpec = tween(300)) + fadeIn(animationSpec = tween(300)),
+        exit = shrinkVertically(animationSpec = tween(400)) + fadeOut(animationSpec = tween(400)),
     ) {
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .clip(CircleShape)
-                .background(dot.copy(alpha = if (level == ConnectionLevel.GREEN) pulseAlpha else 1f))
+        val bg by animateColorAsState(
+            targetValue = when (level) {
+                ConnectionLevel.GREEN  -> GreenBg
+                ConnectionLevel.YELLOW -> YellowBg
+                ConnectionLevel.ORANGE -> OrangeBg
+                ConnectionLevel.RED    -> RedBg
+            },
+            animationSpec = tween(400),
+            label = "conn_bg",
         )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = textColor,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        val dot by animateColorAsState(
+            targetValue = when (level) {
+                ConnectionLevel.GREEN  -> GreenDot
+                ConnectionLevel.YELLOW -> YellowDot
+                ConnectionLevel.ORANGE -> OrangeDot
+                ConnectionLevel.RED    -> RedDot
+            },
+            animationSpec = tween(400),
+            label = "conn_dot",
         )
+        val textColor by animateColorAsState(
+            targetValue = when (level) {
+                ConnectionLevel.GREEN  -> Color(0xFFA5D6A7)
+                ConnectionLevel.YELLOW -> Color(0xFFFFF9C4)
+                ConnectionLevel.ORANGE -> Color(0xFFFFE0B2)
+                ConnectionLevel.RED    -> Color(0xFFFFCDD2)
+            },
+            animationSpec = tween(400),
+            label = "conn_text",
+        )
+
+        val baseLabel = when (level) {
+            ConnectionLevel.GREEN  -> stringResource(R.string.conn_green)
+            ConnectionLevel.YELLOW -> stringResource(R.string.conn_yellow)
+            ConnectionLevel.ORANGE -> stringResource(R.string.conn_orange)
+            ConnectionLevel.RED    -> stringResource(R.string.conn_red)
+        }
+        val routeLabel = connectionRouteLabelRes(lastOutcome?.route)?.let { stringResource(it) }
+        val label = if (routeLabel != null) {
+            stringResource(R.string.conn_with_route, baseLabel, routeLabel)
+        } else {
+            baseLabel
+        }
+
+        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+        val pulseAlpha by infiniteTransition.animateFloat(
+            initialValue = 0.4f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(800),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "pulse_alpha"
+        )
+
+        Row(
+            modifier = modifier
+                .fillMaxWidth()
+                .background(bg)
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(dot.copy(alpha = if (level == ConnectionLevel.GREEN) pulseAlpha else 1f))
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = textColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }

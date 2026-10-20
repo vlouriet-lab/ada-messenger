@@ -1,0 +1,32 @@
+# Repository-root Cargo configuration.
+#
+# Why this file exists
+# --------------------
+# `ada-core` depends on `opus`, and its build script `audiopus_sys` configures
+# Opus's bundled sources through CMake. On Windows the `cmake` crate asks for a
+# generator matching the installed Visual Studio, which currently breaks on a
+# machine that only has Visual Studio 2026 plus a standalone CMake 3.x:
+#
+#     CMake Error: Could not create named generator Visual Studio 18 2026
+#
+# Pinning Ninja sidesteps the Visual Studio generator selection entirely.
+# The alternative used by CI is to install Opus through vcpkg and set
+# `LIBOPUS_LIB_DIR`, which makes `audiopus_sys` skip CMake (`OPUS_STATIC=1`).
+#
+# Scope caveat
+# ------------
+# This file only applies when cargo is invoked from the repository root or below.
+# A crate-local `ada-core/.cargo/config.toml` is NOT read when Cargo is invoked
+# from the root with `--manifest-path ada-core/Cargo.toml`.
+#
+# Ninja needs a C/C++ compiler on PATH: run cargo from a Visual Studio developer
+# shell (Developer PowerShell for VS), or set an explicit generator that works in
+# your shell. An explicitly set `CMAKE_GENERATOR` environment variable takes
+# precedence over this value, which is how the NMake fallback documented in
+# `docs/BUILDING.md` stays usable.
+#
+# `[env]` does not override a variable that is already present in the
+# environment, so exporting CMAKE_GENERATOR yourself always wins.
+
+[env]
+CMAKE_GENERATOR = "Ninja"

@@ -15,6 +15,7 @@ include = ["ada_core_create", "ada_core_free", "ada_get_peer_id",
            "ada_send_file_bytes", "ada_get_transfers_json", "ada_cancel_transfer",
            "ada_add_bridge", "ada_get_bridge_status_json",
            "ada_detect_censorship_json", "ada_set_bridge_mode",
+           "ada_is_peer_post_quantum",
            "ada_set_event_callback", "ada_clear_event_callback",
            "AdaResult", "AdaCoreHandle", "AdaEventCallback"]
 

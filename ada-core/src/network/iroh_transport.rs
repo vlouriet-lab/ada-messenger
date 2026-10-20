@@ -135,6 +135,8 @@ pub struct IrohTransport {
     /// Relay hints learned from peers via `IrohHint` / saved bundles.
     /// Used to bypass slow DNS-based address lookup on the first cold connect.
     peer_relays: RwLock<HashMap<[u8; 32], RelayUrl>>,
+    /// Gossip subsystem for group messaging and call signaling overlay.
+    pub gossip: iroh_gossip::net::Gossip,
 }
 
 impl IrohTransport {
@@ -152,7 +154,10 @@ impl IrohTransport {
     ) -> Result<Endpoint> {
         let mut builder = Endpoint::builder()
             .secret_key(secret_key)
-            .alpns(vec![ADA_DM_ALPN.to_vec()])
+            .alpns(vec![
+                ADA_DM_ALPN.to_vec(),
+                crate::network::gossip::GOSSIP_ALPN.to_vec(),
+            ])
             .clear_address_lookup();
 
         let bind_result = match discovery_mode {
@@ -185,6 +190,7 @@ impl IrohTransport {
         let (tx, rx) = mpsc::channel::<IrohMessage>(256);
 
         let endpoint = Self::bind_endpoint(secret_key, discovery_mode).await?;
+        let gossip = iroh_gossip::net::Gossip::builder().spawn(endpoint.clone());
 
         // Accept loop — handles all inbound QUIC connections for the lifetime of
         // the endpoint.  Each accepted connection spawns its own task which loop
@@ -194,10 +200,12 @@ impl IrohTransport {
         let blob_store: BlobStore = Arc::new(RwLock::new(HashMap::new()));
         let ep = endpoint.clone();
         let blob_store_srv = blob_store.clone();
+        let gossip_srv = gossip.clone();
         tokio::spawn(async move {
             while let Some(incoming) = ep.accept().await {
                 let tx = tx.clone();
                 let blob_store = blob_store_srv.clone();
+                let gossip_srv2 = gossip_srv.clone();
                 tokio::spawn(async move {
                     let conn = match incoming.await {
                         Ok(c) => c,
@@ -206,6 +214,12 @@ impl IrohTransport {
                             return;
                         }
                     };
+                    if conn.alpn() == crate::network::gossip::GOSSIP_ALPN {
+                        if let Err(e) = gossip_srv2.handle_connection(conn).await {
+                            tracing::debug!("iroh gossip handle_connection error: {}", e);
+                        }
+                        return;
+                    }
                     let node_id_bytes = *conn.remote_id().as_bytes();
                     // Loop over uni- and bi-directional streams from this peer.
                     // Uni-streams carry DMs; bidi-streams carry blob fetch requests.
@@ -344,6 +358,7 @@ impl IrohTransport {
                 blob_store,
                 peer_addrs: RwLock::new(HashMap::new()),
                 peer_relays: RwLock::new(HashMap::new()),
+                gossip,
             },
             rx,
         ))

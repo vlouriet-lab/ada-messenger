@@ -30,6 +30,48 @@ Out of scope:
 - Vulnerabilities requiring a rooted/compromised device or physical access.
 - Social‑engineering and third‑party infrastructure not in this repository.
 
+## Post-Quantum Cryptography & Pattern Authentication
+
+ADA Messenger incorporates NIST FIPS 203 ML-KEM-768 for quantum-resistant
+key encapsulation alongside classical X25519 Diffie-Hellman in a hybrid
+configuration:
+- **PQXDH Key Agreement**: Hybrid pre-key bundles combine classical X25519 with
+  ML-KEM-768 encapsulation, defeating Harvest-Now-Decrypt-Later (HNDL) attacks.
+- **SPQR (Signal Post-Quantum Ratchet)**: Asymmetric ratchet steps rotate both
+  X25519 and ML-KEM-768 keys to provide quantum forward secrecy.
+- **Pattern Authentication Entropy**: The visual pattern password uses 16 cells
+  chosen from an 8×8 grid with 5 distinct colors ($C(64, 16) \times 5^{16} \approx 7.45 \times 10^{25} \approx 85.9\text{ bits}$
+  of raw entropy), derived via Argon2id (64 MiB, $t=3, p=1$).
+For detailed cryptographic specifications, see
+[`docs/architecture/POST_QUANTUM_AND_DPI.md`](docs/architecture/POST_QUANTUM_AND_DPI.md).
+
+## Group Gossip & Real-Time Call Security
+
+Group messaging, SenderKey distributions, and call signaling utilize an authenticated
+`iroh-gossip` overlay (HyParView + PlumTree), while real-time media streams remain strictly
+isolated:
+- **Blind Topic Derivation**: Gossip topic identifiers are computed as
+  `TopicId = BLAKE3(group_id || "ada-gossip-topic-v1")`. The cleartext `group_id` is never
+  exposed in network headers or relay discovery metadata.
+- **Signed Envelopes (`GossipEnvelope`)**: Every gossip frame is authenticated with an
+  Ed25519 signature over `BLAKE3(group_id || sender || timestamp || payload)`. Unsigned or
+  tampered packets are dropped immediately before entering application state.
+- **Strict Media Plane Isolation**: Real-time voice and video streams (WebRTC / QUIC) never
+  pass through the gossip overlay tree to eliminate multi-hop jitter and latency. Media sessions
+  are capped at a hard limit of 6 participants (`MAX_GROUP_CALL_PARTICIPANTS = 6`).
+For detailed architectural specifications, see
+[`docs/architecture/IROH_GOSSIP_INTEGRATION_PLAN.md`](docs/architecture/IROH_GOSSIP_INTEGRATION_PLAN.md).
+
+## Key verification and its limits
+
+Identity keys are bound to contact cards by signature and pinned on first use;
+users can compare a 60-digit safety number out-of-band. What that does and, more
+importantly, does not detect is documented in
+[`docs/architecture/CONTACT_VERIFICATION.md`](docs/architecture/CONTACT_VERIFICATION.md)
+— please read it before reporting a "key substitution" issue, since a
+man-in-the-middle present at *first* contact is only detectable by comparing safety
+numbers, not locally.
+
 ## Handling of secrets
 
 This repository must never contain real secrets. Signing keystores

@@ -22,9 +22,9 @@
 #define PATTERN_CUBES 16
 
 /**
- * Number of available cube colours (0 = primary, 1 = secondary, 2 = tertiary).
+ * Number of available cube colours (0 to 4).
  */
-#define PATTERN_COLORS 3
+#define PATTERN_COLORS 5
 
 /**
  * Byte length of the canonical password fed to Argon2id:

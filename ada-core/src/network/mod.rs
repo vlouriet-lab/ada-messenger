@@ -1,4 +1,5 @@
 pub mod dpi;
+pub mod gossip;
 pub mod iroh_fallback;
 pub mod iroh_transport;
 pub mod relay;

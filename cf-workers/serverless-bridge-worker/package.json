@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check index.js",
+    "check": "node --check protocol.js && node --check mailbox-store.js && node --check index.js",
+    "test": "node --test \"test/**/*.test.mjs\"",
     "dry-run": "wrangler deploy --dry-run",
     "deploy": "wrangler deploy"
   },

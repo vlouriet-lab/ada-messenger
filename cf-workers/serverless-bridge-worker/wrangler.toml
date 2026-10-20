@@ -19,6 +19,19 @@ BRIDGE_FINGERPRINT_HEX = ""
 # Optional: raise if you want mailbox size caps per peer.
 MAX_QUEUE_PER_PEER = "256"
 
+# Envelopes returned by a single /mailbox/pull, and by a single live drain batch.
+MAX_PULL_PER_REQUEST = "64"
+MAX_LIVE_BATCH = "64"
+
+# Per-envelope size ceiling (bytes). Must stay above the largest legitimate bridge
+# frame (a 512 KiB file chunk plus serialisation overhead), otherwise transfers
+# start getting rejected with HTTP 413.
+MAX_WIRE_BYTES = "4194304"
+
+# Mailbox lifetime (ms). Used only when an envelope carries no `expires_at`;
+# the Rust client normally sets expires_at itself (48 h).
+MAILBOX_TTL_MS = "172800000"
+
 # Token-bucket defaults mirror the Rust reference bridge backend.
 MAILBOX_IP_RATE_CAPACITY = "60"
 MAILBOX_IP_RATE_REFILL_PER_SEC = "10"

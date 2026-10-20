@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.ChatBubble
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -83,6 +84,7 @@ fun MainScreen(
     val searchResults by viewModel.searchResults.collectAsState()
     val isCleanMode by viewModel.isCleanMode.collectAsState()
     val onlinePeers by viewModel.onlinePeers.collectAsState()
+    val verifiedContacts by viewModel.verifiedContacts.collectAsState()
     var showAddDialog   by remember { mutableStateOf(false) }
     var showMyQrDialog  by remember { mutableStateOf(false) }
     var showCreateGroupDialog by remember { mutableStateOf(false) }
@@ -399,6 +401,7 @@ fun MainScreen(
                                 ConversationRow(
                                     conv = conv,
                                     isOnline = conv.peerIdB64?.let { peerId -> (peerId in onlinePeers).takeIf { it } },
+                                    isVerified = conv.peerIdB64?.let { it in verifiedContacts } ?: false,
                                     onClick = {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                         onChatSelected(conv.id, conv.displayName.ifBlank { conv.id })
@@ -559,6 +562,7 @@ private fun MyQrDialog(
 private fun ConversationRow(
     conv: ConversationItem,
     isOnline: Boolean? = null,
+    isVerified: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
@@ -581,7 +585,12 @@ private fun ConversationRow(
             if (conv.isGroup) {
                 GroupAvatar(size = 48.dp)
             } else {
-                PeerAvatar(peerId = conv.peerIdB64 ?: conv.id, size = 48.dp, isOnline = isOnline)
+                PeerAvatar(
+                    peerId = conv.peerIdB64 ?: conv.id,
+                    displayName = conv.displayName,
+                    size = 48.dp,
+                    isOnline = isOnline,
+                )
             }
 
             // Main content
@@ -592,14 +601,28 @@ private fun ConversationRow(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = conv.displayName.ifBlank { conv.id.take(12) + "…" },
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = if (conv.unreadCount > 0) FontWeight.Bold else FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                    Row(
                         modifier = Modifier.weight(1f, fill = false),
-                    )
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = conv.displayName.ifBlank { conv.id.take(12) + "…" },
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = if (conv.unreadCount > 0) FontWeight.Bold else FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        if (isVerified) {
+                            Icon(
+                                imageVector = Icons.Filled.VerifiedUser,
+                                contentDescription = "Verified",
+                                tint = Color(0xFF66BB6A),
+                                modifier = Modifier.size(15.dp),
+                            )
+                        }
+                    }
                     Text(
                         text = formatTime(conv.lastActivityMs),
                         style = MaterialTheme.typography.labelSmall,

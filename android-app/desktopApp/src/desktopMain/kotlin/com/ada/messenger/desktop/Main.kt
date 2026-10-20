@@ -185,6 +185,7 @@ fun main() = application {
                     onCancelWifiLink = controller::stopWifiLinkServer,
                     onSnapshotPatternSet = controller::createFromSnapshotWithPattern,
                     onNewUser = controller::createNewUser,
+                    onCreateGroup = controller::createGroup,
                 )
 
                 DesktopVideoCallOverlay(
