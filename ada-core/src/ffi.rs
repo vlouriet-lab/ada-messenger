@@ -191,7 +191,7 @@ fn stop_event_callback_worker(handle: &AdaCoreHandle) {
 
 /// Opaque handle to an ADACore instance
 pub struct AdaCoreHandle {
-    inner: Arc<ADACore>,
+    pub(crate) inner: Arc<ADACore>,
     /// Cache of completed inbound transfers: transfer_id_hex -> temp file + metadata.
     completed_transfers: std::sync::Mutex<HashMap<String, CompletedTransferCacheEntry>>,
     // parking_lot::Mutex does not poison on panic — eliminates unwrap() abort risk in FFI
@@ -405,6 +405,133 @@ pub unsafe extern "C" fn ada_mesh_peer_disconnected(
 
     let h = &*handle;
     h.inner.disconnect_mesh_peer(&peer);
+    0
+}
+
+/// Process incoming raw radio frame (BLE Coded PHY, Wi-Fi Aware, 5G Sidelink).
+/// Returns:
+/// 0 - frame processed, no immediate ACK required
+/// 1 - frame processed, ACK generated into `ack_out_buf` (length written to `ack_out_len`)
+/// < 0 - error code
+#[no_mangle]
+pub unsafe extern "C" fn ada_mesh_radio_process_frame(
+    handle: *const AdaCoreHandle,
+    raw_bytes: *const u8,
+    raw_len: usize,
+    transport_kind: u8,
+    hw_addr: *const c_char,
+    rssi_dbm: i8,
+    ack_out_buf: *mut u8,
+    ack_out_max_len: usize,
+    ack_out_len: *mut usize,
+) -> i32 {
+    if handle.is_null() || raw_bytes.is_null() {
+        return -1;
+    }
+
+    let transport = match crate::network::mesh_radio::RadioTransportKind::from_u8(transport_kind) {
+        Some(t) => t,
+        None => return -2,
+    };
+
+    let hw_addr_str = if !hw_addr.is_null() {
+        CStr::from_ptr(hw_addr).to_string_lossy().into_owned()
+    } else {
+        "00:00:00:00:00:00".to_string()
+    };
+
+    let slice = std::slice::from_raw_parts(raw_bytes, raw_len);
+    let h = &*handle;
+
+    runtime().block_on(async {
+        match h.inner.handle_incoming_radio_frame(slice, transport, hw_addr_str, rssi_dbm).await {
+            Ok(Some(ack)) => {
+                if !ack_out_buf.is_null() && !ack_out_len.is_null() {
+                    let copy_len = ack.len().min(ack_out_max_len);
+                    std::ptr::copy_nonoverlapping(ack.as_ptr(), ack_out_buf, copy_len);
+                    *ack_out_len = copy_len;
+                    1
+                } else {
+                    0
+                }
+            }
+            Ok(None) => 0,
+            Err(_) => -3,
+        }
+    })
+}
+
+/// Generate compact 14-byte beacon for discovery broadcasts.
+/// Returns number of bytes written, or < 0 on error.
+#[no_mangle]
+pub unsafe extern "C" fn ada_mesh_radio_generate_beacon(
+    handle: *const AdaCoreHandle,
+    out_buf: *mut u8,
+    max_len: usize,
+) -> i32 {
+    if handle.is_null() || out_buf.is_null() || max_len < 14 {
+        return -1;
+    }
+    let h = &*handle;
+    let beacon = h.inner.generate_mesh_beacon();
+    let copy_len = beacon.len().min(max_len);
+    std::ptr::copy_nonoverlapping(beacon.as_ptr(), out_buf, copy_len);
+    copy_len as i32
+}
+
+/// Registers peer public key to 4-byte short ID mapping.
+/// Returns 32-bit short ID, or 0 on error.
+#[no_mangle]
+pub unsafe extern "C" fn ada_mesh_radio_register_peer(
+    handle: *const AdaCoreHandle,
+    peer_b64: *const c_char,
+) -> u32 {
+    if handle.is_null() || peer_b64.is_null() {
+        return 0;
+    }
+    let peer_str = match CStr::from_ptr(peer_b64).to_str() {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    let peer = match crate::identity::PeerId::from_base64(peer_str) {
+        Ok(p) => p,
+        Err(_) => return 0,
+    };
+    let h = &*handle;
+    h.inner.register_mesh_radio_peer(peer)
+}
+
+/// Updates link metrics (RSSI, SNR) for a known peer over a radio transport.
+#[no_mangle]
+pub unsafe extern "C" fn ada_mesh_radio_update_metrics(
+    handle: *const AdaCoreHandle,
+    peer_b64: *const c_char,
+    transport_kind: u8,
+    hw_addr: *const c_char,
+    rssi_dbm: i8,
+) -> i32 {
+    if handle.is_null() || peer_b64.is_null() {
+        return -1;
+    }
+    let transport = match crate::network::mesh_radio::RadioTransportKind::from_u8(transport_kind) {
+        Some(t) => t,
+        None => return -2,
+    };
+    let hw_addr_str = if !hw_addr.is_null() {
+        CStr::from_ptr(hw_addr).to_string_lossy().into_owned()
+    } else {
+        "00:00:00:00:00:00".to_string()
+    };
+    let peer_str = match CStr::from_ptr(peer_b64).to_str() {
+        Ok(s) => s,
+        Err(_) => return -3,
+    };
+    let peer = match crate::identity::PeerId::from_base64(peer_str) {
+        Ok(p) => p,
+        Err(_) => return -4,
+    };
+    let h = &*handle;
+    h.inner.update_mesh_radio_metrics(&peer, transport, hw_addr_str, rssi_dbm);
     0
 }
 

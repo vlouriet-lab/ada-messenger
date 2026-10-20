@@ -938,6 +938,198 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeMeshPeerDisco
     res as jint
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeMeshRadioProcessFrame(
+    mut env: JNIEnv,
+    _obj: JObject,
+    handle: jlong,
+    bytes: jni::objects::JByteArray,
+    transport_kind: jint,
+    hw_addr: JString,
+    rssi_dbm: jint,
+) -> jni::sys::jbyteArray {
+    let bytes_u8 = match env.convert_byte_array(&bytes) {
+        Ok(b) => b,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let hw_str: String = match env.get_string(&hw_addr) {
+        Ok(s) => s.into(),
+        Err(_) => "00:00:00:00:00:00".to_string(),
+    };
+    let hw_c = match std::ffi::CString::new(hw_str) {
+        Ok(s) => s,
+        Err(_) => return std::ptr::null_mut(),
+    };
+
+    let mut ack_buf = [0u8; 64];
+    let mut ack_len = 0usize;
+
+    let res = crate::ffi::ada_mesh_radio_process_frame(
+        handle as *const crate::ffi::AdaCoreHandle,
+        bytes_u8.as_ptr(),
+        bytes_u8.len(),
+        transport_kind as u8,
+        hw_c.as_ptr(),
+        rssi_dbm as i8,
+        ack_buf.as_mut_ptr(),
+        ack_buf.len(),
+        &mut ack_len,
+    );
+
+    if res == 1 && ack_len > 0 {
+        match env.byte_array_from_slice(&ack_buf[..ack_len]) {
+            Ok(arr) => arr.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    } else {
+        std::ptr::null_mut()
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeMeshRadioGenerateBeacon(
+    env: JNIEnv,
+    _obj: JObject,
+    handle: jlong,
+) -> jni::sys::jbyteArray {
+    let mut beacon_buf = [0u8; 64];
+    let written = crate::ffi::ada_mesh_radio_generate_beacon(
+        handle as *const crate::ffi::AdaCoreHandle,
+        beacon_buf.as_mut_ptr(),
+        beacon_buf.len(),
+    );
+
+    if written > 0 {
+        match env.byte_array_from_slice(&beacon_buf[..written as usize]) {
+            Ok(arr) => arr.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    } else {
+        std::ptr::null_mut()
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeMeshRadioRegisterPeer(
+    mut env: JNIEnv,
+    _obj: JObject,
+    handle: jlong,
+    peer_b64: JString,
+) -> jint {
+    let peer_str: String = match env.get_string(&peer_b64) {
+        Ok(s) => s.into(),
+        Err(_) => return 0,
+    };
+    let peer_c = match std::ffi::CString::new(peer_str) {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    let short_id = crate::ffi::ada_mesh_radio_register_peer(
+        handle as *const crate::ffi::AdaCoreHandle,
+        peer_c.as_ptr(),
+    );
+    short_id as jint
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeMeshRadioUpdateMetrics(
+    mut env: JNIEnv,
+    _obj: JObject,
+    handle: jlong,
+    peer_b64: JString,
+    transport_kind: jint,
+    hw_addr: JString,
+    rssi_dbm: jint,
+) -> jint {
+    let peer_str: String = match env.get_string(&peer_b64) {
+        Ok(s) => s.into(),
+        Err(_) => return -1,
+    };
+    let peer_c = match std::ffi::CString::new(peer_str) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+    let hw_str: String = match env.get_string(&hw_addr) {
+        Ok(s) => s.into(),
+        Err(_) => "00:00:00:00:00:00".to_string(),
+    };
+    let hw_c = match std::ffi::CString::new(hw_str) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    crate::ffi::ada_mesh_radio_update_metrics(
+        handle as *const crate::ffi::AdaCoreHandle,
+        peer_c.as_ptr(),
+        transport_kind as u8,
+        hw_c.as_ptr(),
+        rssi_dbm as i8,
+    ) as jint
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeMeshRadioPrepareFrames(
+    mut env: JNIEnv,
+    _obj: JObject,
+    handle: jlong,
+    peer_b64: JString,
+    wire_bytes: jni::objects::JByteArray,
+    transport_kind: jint,
+    requires_ack: jboolean,
+) -> jni::sys::jobjectArray {
+    if handle == 0 {
+        return std::ptr::null_mut();
+    }
+    let peer_str: String = match env.get_string(&peer_b64) {
+        Ok(s) => s.into(),
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let peer = match crate::identity::PeerId::from_base64(&peer_str) {
+        Ok(p) => p,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let bytes_u8 = match env.convert_byte_array(&wire_bytes) {
+        Ok(b) => b,
+        Err(_) => return std::ptr::null_mut(),
+    };
+
+    let transport_opt = crate::network::mesh_radio::RadioTransportKind::from_u8(transport_kind as u8);
+    let h = &*(handle as *const crate::ffi::AdaCoreHandle);
+
+    let frames: Vec<Vec<u8>> = match h.inner.prepare_mesh_radio_frames(
+        &peer,
+        &bytes_u8,
+        transport_opt,
+        requires_ack != 0,
+    ) {
+        Ok(f) => f,
+        Err(_) => return std::ptr::null_mut(),
+    };
+
+    // Find byte[] class
+    let byte_arr_class = match env.find_class("[B") {
+        Ok(c) => c,
+        Err(_) => return std::ptr::null_mut(),
+    };
+
+    let obj_array = match env.new_object_array(frames.len() as jni::sys::jsize, byte_arr_class, JObject::null()) {
+        Ok(a) => a,
+        Err(_) => return std::ptr::null_mut(),
+    };
+
+    for (i, frame) in frames.iter().enumerate() {
+        let j_frame = match env.byte_array_from_slice(frame) {
+            Ok(f) => f,
+            Err(_) => return std::ptr::null_mut(),
+        };
+        if env.set_object_array_element(&obj_array, i as jni::sys::jsize, j_frame).is_err() {
+            return std::ptr::null_mut();
+        }
+    }
+
+    obj_array.into_raw()
+}
+
 // ─── Identity ─────────────────────────────────────────────────────────────────
 
 #[no_mangle]

@@ -333,6 +333,9 @@ pub struct ADACore {
     /// Set of actively connected local Mesh peers
     active_mesh_peers: parking_lot::RwLock<std::collections::HashSet<PeerId>>,
 
+    /// Off-grid multi-radio mesh engine (BLE Coded PHY, Wi-Fi Aware NAN, 5G Sidelink).
+    mesh_radio_router: Arc<crate::network::mesh_radio::MeshRadioRouter>,
+
     /// Group-call room registry keyed by shared room/session id.
     group_call_rooms_by_session:
         parking_lot::RwLock<std::collections::HashMap<[u8; 16], GroupCallRoomState>>,
@@ -949,6 +952,7 @@ impl ADACore {
         let relay_only_init = config.network.relay_only;
         let connection_profile_init = config.network.connection_profile;
         let data_dir = config.storage.data_dir.clone();
+        let local_peer_id = identity.peer_id.0;
         let core = Arc::new(ADACore {
             identity,
             config,
@@ -967,6 +971,7 @@ impl ADACore {
             ephemeral_aliases: parking_lot::RwLock::new(std::collections::HashMap::new()),
             media_proxies: parking_lot::RwLock::new(std::collections::HashMap::new()),
             active_mesh_peers: parking_lot::RwLock::new(std::collections::HashSet::new()),
+            mesh_radio_router: Arc::new(crate::network::mesh_radio::MeshRadioRouter::new(local_peer_id)),
             group_call_rooms_by_session: parking_lot::RwLock::new(std::collections::HashMap::new()),
             group_call_session_by_call: parking_lot::RwLock::new(std::collections::HashMap::new()),
             iroh: RwLock::new(None),
@@ -6381,6 +6386,162 @@ impl ADACore {
     pub fn disconnect_mesh_peer(&self, peer: &PeerId) {
         self.active_mesh_peers.write().remove(peer);
         tracing::info!("local_mesh: peer {} disconnected", peer);
+    }
+
+    /// Returns reference to the MeshRadioRouter engine
+    pub fn mesh_radio_router(&self) -> &Arc<crate::network::mesh_radio::MeshRadioRouter> {
+        &self.mesh_radio_router
+    }
+
+    /// Generates a compact broadcast beacon (14 bytes) for off-grid radio discovery
+    pub fn generate_mesh_beacon(&self) -> Vec<u8> {
+        let beacon = crate::network::mesh_radio::CompactFrame::new_beacon(
+            self.mesh_radio_router.local_short_id(),
+            &self.identity.peer_id.0,
+            rand::random::<u16>(),
+        );
+        beacon.encode().to_vec()
+    }
+
+    /// Registers a peer's full PeerId with its 4-byte short ID for radio frames
+    pub fn register_mesh_radio_peer(&self, peer: PeerId) -> u32 {
+        let short_id = crate::network::mesh_radio::compute_short_id(&peer.0);
+        self.mesh_radio_router.register_peer(short_id, peer.0);
+        short_id
+    }
+
+    /// Updates link metrics (RSSI, SNR) for a specific peer over a radio transport
+    pub fn update_mesh_radio_metrics(
+        &self,
+        peer: &PeerId,
+        transport: crate::network::mesh_radio::RadioTransportKind,
+        hw_addr: String,
+        rssi_dbm: i8,
+    ) {
+        self.mesh_radio_router.update_route(peer.0, transport, hw_addr, rssi_dbm);
+    }
+
+    /// Handles a raw binary radio frame received from BLE Coded PHY, Wi-Fi Aware NAN, or 5G Sidelink.
+    ///
+    /// If the frame is a complete payload or completes reassembly of fragments,
+    /// it forwards the payload to `receive_mesh_bytes`.
+    /// If the frame requested confirmation (`DataConfirm`), returns `Some(ack_bytes)`
+    /// so the caller can transmit an immediate ACK over the radio link.
+    pub async fn handle_incoming_radio_frame(
+        &self,
+        raw_bytes: &[u8],
+        transport: crate::network::mesh_radio::RadioTransportKind,
+        hw_addr: String,
+        rssi_dbm: i8,
+    ) -> Result<Option<Vec<u8>>> {
+        use bytes::Bytes;
+        use crate::network::mesh_radio::{CompactFrame, MeshProcessResult};
+
+        let bytes = Bytes::copy_from_slice(raw_bytes);
+        let result = self.mesh_radio_router.process_incoming_frame(bytes, transport, hw_addr, rssi_dbm)
+            .map_err(|e| ADAError::Network(format!("mesh_radio error: {}", e)))?;
+
+        match result {
+            MeshProcessResult::BeaconDiscovered { peer_id, .. } => {
+                let peer = PeerId(peer_id);
+                self.active_mesh_peers.write().insert(peer.clone());
+                let dtn_bundles = self.mesh_radio_router.drain_dtn(&peer_id);
+                for bundle in dtn_bundles {
+                    let _ = self.event_tx.send(ADAEvent::SendViaLocalMesh {
+                        peer: peer.clone(),
+                        payload: bundle.encrypted_payload.to_vec(),
+                    }).await;
+                }
+                Ok(None)
+            }
+            MeshProcessResult::PayloadComplete {
+                sender_id,
+                sender_short_id,
+                msg_id,
+                payload,
+                needs_ack,
+            } => {
+                let ack_bytes = if needs_ack {
+                    let ack = CompactFrame::new_ack(
+                        self.mesh_radio_router.local_short_id(),
+                        sender_short_id,
+                        msg_id,
+                    );
+                    Some(ack.encode().to_vec())
+                } else {
+                    None
+                };
+
+                let peer_raw = match sender_id {
+                    Some(p) => p,
+                    None => {
+                        tracing::warn!(
+                            "mesh_radio: received payload from unknown short_id 0x{:08X}",
+                            sender_short_id
+                        );
+                        return Ok(ack_bytes);
+                    }
+                };
+                let peer = PeerId(peer_raw);
+                self.active_mesh_peers.write().insert(peer.clone());
+                let _ = self.receive_mesh_bytes(peer, payload.to_vec()).await;
+
+                Ok(ack_bytes)
+            }
+            MeshProcessResult::AckReceived { sender_short_id, msg_id } => {
+                tracing::debug!(
+                    "mesh_radio: ACK received for msg_id {} from 0x{:08X}",
+                    msg_id,
+                    sender_short_id
+                );
+                Ok(None)
+            }
+            MeshProcessResult::FragmentBuffered { .. } => Ok(None),
+            MeshProcessResult::Ignored => Ok(None),
+        }
+    }
+
+    /// Prepares fragmented radio frames for sending a message payload over the optimal radio link.
+    pub fn prepare_mesh_radio_frames(
+        &self,
+        target: &PeerId,
+        wire_bytes: &[u8],
+        transport: Option<crate::network::mesh_radio::RadioTransportKind>,
+        requires_ack: bool,
+    ) -> Result<Vec<Vec<u8>>> {
+        use bytes::Bytes;
+        use crate::network::mesh_radio::{compute_short_id, CompactFrame, FrameType, RadioTransportKind};
+
+        let target_short_id = compute_short_id(&target.0);
+        self.mesh_radio_router.register_peer(target_short_id, target.0);
+
+        let chosen_transport = transport
+            .or_else(|| {
+                self.mesh_radio_router
+                    .select_best_route(&target.0, wire_bytes.len())
+                    .map(|r| r.transport)
+            })
+            .unwrap_or(RadioTransportKind::BleCodedPhy);
+
+        let mtu = chosen_transport.default_mtu();
+        let frame_type = if requires_ack {
+            FrameType::DataConfirm
+        } else {
+            FrameType::DataNonConf
+        };
+        let msg_id = rand::random::<u16>();
+
+        let frames = CompactFrame::fragment_payload(
+            frame_type,
+            self.mesh_radio_router.local_short_id(),
+            target_short_id,
+            msg_id,
+            Bytes::copy_from_slice(wire_bytes),
+            mtu,
+        ).map_err(|e| ADAError::Network(format!("mesh_radio fragment error: {}", e)))?;
+
+        let encoded = frames.into_iter().map(|f| f.encode().to_vec()).collect();
+        Ok(encoded)
     }
 
     /// Deserialises the `WireEnvelope` and dispatches DM vs Group messages.
