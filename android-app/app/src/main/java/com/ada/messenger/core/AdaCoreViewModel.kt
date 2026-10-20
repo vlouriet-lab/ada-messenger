@@ -716,6 +716,17 @@ class AdaCoreViewModel(private val appContext: Context) : ViewModel() {
         }
     }
 
+    fun setPeerDirectP2PAllowed(peerIdB64: String, allowed: Boolean, onDone: (() -> Unit)? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = core?.setPeerDirectP2PAllowed(peerIdB64, allowed) ?: false
+            if (ok) {
+                refreshVerifiedContacts()
+                refreshConversations()
+            }
+            withContext(Dispatchers.Main) { onDone?.invoke() }
+        }
+    }
+
     fun acceptContactKeyChange(peerIdB64: String, onDone: (() -> Unit)? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             val ok = core?.acceptContactKeyChange(peerIdB64) ?: false

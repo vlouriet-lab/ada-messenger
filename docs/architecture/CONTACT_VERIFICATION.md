@@ -118,12 +118,26 @@ The security JSON looks like this:
   "verified_at_ms": null,
   "verified_safety_number": null,
   "key_changed": false,
-  "pending": null
+  "pending": null,
+  "direct_p2p_allowed": false
 }
 ```
 
 `ik_authenticated: false` means the contact's key is known only by first-use trust —
 worth a visible hint in the UI, and worth verifying out-of-band.
+
+### 3. Anti-Deanon IP Shield (Relay-Only by Default)
+
+Direct P2P connections (IP-to-IP hole punching) expose your device's external IP
+address and approximate geolocation to the peer. To protect against malicious peers
+fishing for IP addresses:
+
+- **Untrusted / Default**: Connections strictly route through encrypted Iroh DERP relays.
+  No direct socket addresses are exchanged or accepted.
+- **Trusted (Verified)**: Marking a contact as verified sets `direct_p2p_allowed = true`,
+  unlocking direct P2P connections for minimal latency during calls and rapid file transfer.
+- If verification is cleared or revoked, existing direct connections are terminated
+  and fall back to relay.
 
 ## Limits (stated plainly)
 

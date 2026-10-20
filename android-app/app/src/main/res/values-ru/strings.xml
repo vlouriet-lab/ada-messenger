@@ -558,6 +558,10 @@ websocket ada-edge.example.workers.dev:443 fp=1111111111111111111111111111111111
     <string name="security_sheet_pq_active">Квантовая защита: Активна (ML-KEM-768)</string>
     <string name="security_sheet_pq_classic">Квантовая защита: Классическая (X25519)</string>
     <string name="security_sheet_safety_digits_title">Цифры безопасности (60)</string>
+    <string name="security_sheet_ip_shield_active">Защита IP: Активна (Только реле)</string>
+    <string name="security_sheet_ip_shield_desc">Ваш реальный IP-адрес и геолокация скрыты. Соединение идёт исключительно через зашифрованные реле Iroh.</string>
+    <string name="security_sheet_ip_shield_trusted">Прямое P2P: Разрешено (Доверенный)</string>
+    <string name="security_sheet_ip_shield_trusted_desc">Прямое P2P-соединение разрешено для минимальной задержки звонков и быстрой передачи файлов.</string>
     <string name="security_sheet_close">Закрыть</string>
 
     <string name="contact_key_change_title">Ключ безопасности изменился</string>

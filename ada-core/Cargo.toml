@@ -70,6 +70,7 @@ argon2 = "0.5"
 chacha20poly1305 = "0.10"
 iroh = { version = "0.96.1", features = ["address-lookup-mdns"] }
 iroh-gossip = "0.96.0"
+n0-watcher = "0.6"
 log = "0.4"
 android_logger = { version = "0.14", optional = true }
 tracing-log = { version = "0.2", optional = true }

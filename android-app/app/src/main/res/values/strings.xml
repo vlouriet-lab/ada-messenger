@@ -548,6 +548,10 @@
     <string name="security_sheet_pq_active">Quantum Protection: Active (ML-KEM-768)</string>
     <string name="security_sheet_pq_classic">Quantum Protection: Classic (X25519)</string>
     <string name="security_sheet_safety_digits_title">Safety digits (60)</string>
+    <string name="security_sheet_ip_shield_active">IP Shield: Active (Relay Only)</string>
+    <string name="security_sheet_ip_shield_desc">Your real IP and location are hidden. The peer only connects through encrypted Iroh relay servers.</string>
+    <string name="security_sheet_ip_shield_trusted">Direct P2P: Allowed (Trusted)</string>
+    <string name="security_sheet_ip_shield_trusted_desc">Direct P2P connection allowed for lowest call latency and fast file transfers.</string>
     <string name="security_sheet_close">Close</string>
 
     <string name="contact_key_change_title">Security Key Changed</string>

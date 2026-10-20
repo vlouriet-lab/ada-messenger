@@ -27,7 +27,8 @@ use crate::error::{ADAError, Result};
 use iroh::address_lookup::{DnsAddressLookup, MdnsAddressLookup, PkarrPublisher};
 use iroh::endpoint::Connection;
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayUrl, SecretKey, TransportAddr};
-use std::collections::HashMap;
+use n0_watcher::Watcher;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
@@ -135,6 +136,9 @@ pub struct IrohTransport {
     /// Relay hints learned from peers via `IrohHint` / saved bundles.
     /// Used to bypass slow DNS-based address lookup on the first cold connect.
     peer_relays: RwLock<HashMap<[u8; 32], RelayUrl>>,
+    /// Set of peers explicitly trusted for direct P2P connections (IP-level hole punching).
+    /// Peers NOT in this set are strictly routed via Iroh Relay (DERP), masking their real IP.
+    pub trusted_direct_peers: Arc<RwLock<HashSet<[u8; 32]>>>,
     /// Gossip subsystem for group messaging and call signaling overlay.
     pub gossip: iroh_gossip::net::Gossip,
 }
@@ -192,6 +196,9 @@ impl IrohTransport {
         let endpoint = Self::bind_endpoint(secret_key, discovery_mode).await?;
         let gossip = iroh_gossip::net::Gossip::builder().spawn(endpoint.clone());
 
+        let trusted_direct_peers = Arc::new(RwLock::new(HashSet::new()));
+        let trusted_for_accept = trusted_direct_peers.clone();
+
         // Accept loop — handles all inbound QUIC connections for the lifetime of
         // the endpoint.  Each accepted connection spawns its own task which loop
         // over incoming uni-directional streams from that peer.
@@ -206,6 +213,7 @@ impl IrohTransport {
                 let tx = tx.clone();
                 let blob_store = blob_store_srv.clone();
                 let gossip_srv2 = gossip_srv.clone();
+                let trusted_check = trusted_for_accept.clone();
                 tokio::spawn(async move {
                     let conn = match incoming.await {
                         Ok(c) => c,
@@ -221,6 +229,22 @@ impl IrohTransport {
                         return;
                     }
                     let node_id_bytes = *conn.remote_id().as_bytes();
+                    // Enforce Relay-Only by default: reject direct P2P connections from untrusted peers
+                    let is_trusted = trusted_check.read().await.contains(&node_id_bytes);
+                    if !is_trusted {
+                        let paths = conn.paths().get();
+                        let is_direct = paths
+                            .iter()
+                            .any(|p| p.is_selected() && matches!(p.remote_addr(), TransportAddr::Ip(_)));
+                        if is_direct {
+                            tracing::warn!(
+                                "iroh: rejecting direct incoming P2P connection from untrusted peer {}",
+                                hex::encode(node_id_bytes)
+                            );
+                            conn.close(1u32.into(), b"direct-p2p-requires-trusted-contact");
+                            return;
+                        }
+                    }
                     // Loop over uni- and bi-directional streams from this peer.
                     // Uni-streams carry DMs; bidi-streams carry blob fetch requests.
                     loop {
@@ -358,6 +382,7 @@ impl IrohTransport {
                 blob_store,
                 peer_addrs: RwLock::new(HashMap::new()),
                 peer_relays: RwLock::new(HashMap::new()),
+                trusted_direct_peers,
                 gossip,
             },
             rx,
@@ -524,6 +549,39 @@ impl IrohTransport {
             map.insert(*peer_id, relay_url);
         }
         Ok(())
+    }
+
+    /// Allow or disallow direct P2P (IP-level) connections for a specific peer.
+    /// When allowed is false, any existing cached connection is closed and evicted,
+    /// forcing subsequent communication through the relay.
+    pub async fn set_peer_direct_allowed(&self, peer_id: &[u8; 32], allowed: bool) {
+        if allowed {
+            self.trusted_direct_peers.write().await.insert(*peer_id);
+            tracing::info!(
+                "iroh: direct P2P connection allowed for trusted peer {}",
+                hex::encode(peer_id)
+            );
+        } else {
+            self.trusted_direct_peers.write().await.remove(peer_id);
+            tracing::info!(
+                "iroh: direct P2P revoked for peer {}, forcing relay-only",
+                hex::encode(peer_id)
+            );
+            let mut cache = self.conn_cache.write().await;
+            if let Some(old_conn) = cache.remove(peer_id) {
+                old_conn.close(0u32.into(), b"direct-p2p-revoked");
+            }
+        }
+    }
+
+    /// Check if direct P2P is allowed for this peer.
+    pub async fn is_peer_direct_allowed(&self, peer_id: &[u8; 32]) -> bool {
+        self.trusted_direct_peers.read().await.contains(peer_id)
+    }
+
+    /// Return all currently trusted direct peers.
+    pub async fn get_trusted_direct_peers(&self) -> HashSet<[u8; 32]> {
+        self.trusted_direct_peers.read().await.clone()
     }
 
     /// Proactively open (and cache) a QUIC connection to `peer_id`.
@@ -868,12 +926,22 @@ impl IrohTransport {
         let node_id = EndpointId::from_bytes(peer_id)
             .map_err(|e| ADAError::Network(format!("iroh bad EndpointId: {}", e)))?;
 
+        let is_direct_allowed = self.is_peer_direct_allowed(peer_id).await;
         let mut transports = Vec::new();
         if let Some(relay_url) = self.peer_relays.read().await.get(peer_id).cloned() {
             transports.push(TransportAddr::Relay(relay_url));
         }
-        if let Some(addr) = self.peer_addrs.read().await.get(peer_id).copied() {
-            transports.push(TransportAddr::Ip(addr));
+        if is_direct_allowed {
+            if let Some(addr) = self.peer_addrs.read().await.get(peer_id).copied() {
+                transports.push(TransportAddr::Ip(addr));
+            }
+        } else if transports.is_empty() {
+            // For untrusted peers with no known relay hint, fall back to home relay to avoid direct IP discovery
+            if let Some(home_url) = self.home_relay_url() {
+                if let Ok(relay_url) = home_url.parse() {
+                    transports.push(TransportAddr::Relay(relay_url));
+                }
+            }
         }
         let node_addr = EndpointAddr::from_parts(node_id, transports);
 

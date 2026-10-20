@@ -274,6 +274,7 @@ data class ContactSecurityInfo(
     val verifiedSafetyNumber: String?,
     val keyChanged: Boolean,
     val pending: PendingKeyChange?,
+    val directP2PAllowed: Boolean = false,
 )
 
 data class ContactKeyChangeEvent(
@@ -313,6 +314,7 @@ fun parseContactSecurity(json: String): ContactSecurityInfo? {
             verifiedSafetyNumber = if (o.has("verified_safety_number") && !o.isNull("verified_safety_number")) o.optString("verified_safety_number") else null,
             keyChanged = o.optBoolean("key_changed", false),
             pending = pending,
+            directP2PAllowed = o.optBoolean("direct_p2p_allowed", false),
         )
     } catch (e: Exception) {
         null

@@ -666,6 +666,27 @@ pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nati
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativeSetPeerDirectP2PAllowed(
+    env: JNIEnv,
+    obj: JObject,
+    handle: jlong,
+    peer_id_b64: JString,
+    allowed: jboolean,
+) -> jint {
+    Java_com_ada_messenger_core_AdaCore_nativeSetPeerDirectP2PAllowed(env, obj, handle, peer_id_b64, allowed)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativeIsPeerDirectP2PAllowed(
+    env: JNIEnv,
+    obj: JObject,
+    handle: jlong,
+    peer_id_b64: JString,
+) -> jboolean {
+    Java_com_ada_messenger_core_AdaCore_nativeIsPeerDirectP2PAllowed(env, obj, handle, peer_id_b64)
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativeAcceptContactKeyChange(
     env: JNIEnv,
     obj: JObject,
@@ -3309,6 +3330,59 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeClearContactV
         matches!(res, crate::ffi::AdaResult::Ok) as jint ^ 1
     }))
     .unwrap_or(1)
+}
+
+/// Explicitly allow or disallow direct P2P for a contact.
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeSetPeerDirectP2PAllowed(
+    mut env: JNIEnv,
+    _obj: JObject,
+    handle: jlong,
+    peer_id_b64: JString,
+    allowed: jboolean,
+) -> jint {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let peer_str: String = match env.get_string(&peer_id_b64) {
+            Ok(s) => s.into(),
+            Err(_) => return 1,
+        };
+        let peer_c = match CString::new(peer_str) {
+            Ok(s) => s,
+            Err(_) => return 1,
+        };
+        let res = crate::ffi::ada_set_peer_direct_p2p_allowed(
+            handle as *const AdaCoreHandle,
+            peer_c.as_ptr(),
+            allowed != 0,
+        );
+        matches!(res, crate::ffi::AdaResult::Ok) as jint ^ 1
+    }))
+    .unwrap_or(1)
+}
+
+/// Check whether direct P2P is allowed for a contact.
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeIsPeerDirectP2PAllowed(
+    mut env: JNIEnv,
+    _obj: JObject,
+    handle: jlong,
+    peer_id_b64: JString,
+) -> jboolean {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let peer_str: String = match env.get_string(&peer_id_b64) {
+            Ok(s) => s.into(),
+            Err(_) => return 0,
+        };
+        let peer_c = match CString::new(peer_str) {
+            Ok(s) => s,
+            Err(_) => return 0,
+        };
+        crate::ffi::ada_is_peer_direct_p2p_allowed(
+            handle as *const AdaCoreHandle,
+            peer_c.as_ptr(),
+        ) as jboolean
+    }))
+    .unwrap_or(0)
 }
 
 /// Accept a pending identity key change for a contact.

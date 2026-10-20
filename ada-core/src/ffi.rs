@@ -3422,6 +3422,39 @@ pub unsafe extern "C" fn ada_clear_contact_verified(
     })
 }
 
+/// Explicitly allow or disallow direct P2P (IP-level hole punching) for a peer.
+///
+/// # Safety: `handle` valid; `peer_id_b64` a valid null-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn ada_set_peer_direct_p2p_allowed(
+    handle: *const AdaCoreHandle,
+    peer_id_b64: *const c_char,
+    allowed: bool,
+) -> AdaResult {
+    contact_security_action(handle, peer_id_b64, |core, peer| {
+        core.set_peer_direct_p2p_allowed(peer, allowed)
+    })
+}
+
+/// Check whether direct P2P is allowed for this peer.
+///
+/// # Safety: `handle` valid; `peer_id_b64` a valid null-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn ada_is_peer_direct_p2p_allowed(
+    handle: *const AdaCoreHandle,
+    peer_id_b64: *const c_char,
+) -> bool {
+    if handle.is_null() || peer_id_b64.is_null() {
+        return false;
+    }
+    let h = &*handle;
+    let peer = match CStr::from_ptr(peer_id_b64).to_str() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    h.inner.is_peer_direct_p2p_allowed(peer)
+}
+
 /// Adopt a pending identity-key change after the user confirmed the new safety number.
 ///
 /// # Safety: `handle` valid; `peer_id_b64` a valid null-terminated UTF-8 string.

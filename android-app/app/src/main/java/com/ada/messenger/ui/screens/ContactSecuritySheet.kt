@@ -310,7 +310,72 @@ fun ContactSecuritySheet(
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // IP Shield Status Card
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isVerified)
+                        Color(0xFF1B5E20).copy(alpha = 0.15f)
+                    else
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                ),
+                border = BorderStroke(
+                    1.dp,
+                    if (isVerified) Color(0xFF81C784).copy(alpha = 0.4f)
+                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isVerified) Color(0xFF1B5E20) else MaterialTheme.colorScheme.primaryContainer
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = if (isVerified) Icons.Filled.VerifiedUser else Icons.Filled.Shield,
+                            contentDescription = null,
+                            tint = if (isVerified) Color(0xFF81C784) else MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(
+                                if (isVerified) R.string.security_sheet_ip_shield_trusted
+                                else R.string.security_sheet_ip_shield_active
+                            ),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = stringResource(
+                                if (isVerified) R.string.security_sheet_ip_shield_trusted_desc
+                                else R.string.security_sheet_ip_shield_desc
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             HorizontalDivider(
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),

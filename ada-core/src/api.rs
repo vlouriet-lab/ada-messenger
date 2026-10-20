@@ -524,6 +524,10 @@ struct ContactKeyRecord {
     /// The safety number the user compared at `verified_at_ms` (digits only).
     #[serde(default)]
     verified_safety_number: Option<String>,
+    /// Explicit flag whether direct P2P (IP-level hole punching) is allowed.
+    /// By default `false` (Relay-Only) until the contact is marked as verified/trusted.
+    #[serde(default)]
+    pub direct_p2p_allowed: bool,
     /// A replacement bundle that arrived but has not been accepted by the user.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pending: Option<PublicBundle>,
@@ -537,6 +541,7 @@ impl ContactKeyRecord {
             first_seen_ms: unix_now_ms(),
             verified_at_ms: None,
             verified_safety_number: None,
+            direct_p2p_allowed: false,
             pending: None,
         }
     }
@@ -1119,6 +1124,13 @@ impl ADACore {
             start_started_at.elapsed()
         );
         for bundle in known_contacts {
+            let is_trusted = self
+                .contact_key_record(&bundle.peer_id)
+                .map(|r| r.direct_p2p_allowed || r.verified_at_ms.is_some())
+                .unwrap_or(false);
+            if is_trusted {
+                transport.set_peer_direct_allowed(&bundle.peer_id.0, true).await;
+            }
             if let Some(relay_url) = bundle.relay_url.as_deref() {
                 if let Err(error) = transport.add_peer_relay(&bundle.peer_id.0, relay_url) {
                     tracing::debug!(
@@ -7454,6 +7466,10 @@ impl ADACore {
                 .as_ref()
                 .map(|record| record.verified_at_ms.is_some())
                 .unwrap_or(false),
+            "direct_p2p_allowed": record
+                .as_ref()
+                .map(|record| record.direct_p2p_allowed || record.verified_at_ms.is_some())
+                .unwrap_or(false),
             "verified_at_ms": record.as_ref().and_then(|record| record.verified_at_ms),
             "verified_safety_number": record
                 .as_ref()
@@ -7503,7 +7519,20 @@ impl ADACore {
 
         record.verified_at_ms = Some(unix_now_ms());
         record.verified_safety_number = Some(self.safety_number_for(&peer));
-        self.save_contact_key_record(&peer, &record)
+        record.direct_p2p_allowed = true;
+        self.save_contact_key_record(&peer, &record)?;
+
+        let peer_bytes = peer.0;
+        if let Ok(guard) = self.iroh.try_read() {
+            if let Some(transport) = guard.as_ref().cloned() {
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    handle.spawn(async move {
+                        transport.set_peer_direct_allowed(&peer_bytes, true).await;
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Forget a previous safety-number verification.
@@ -7512,9 +7541,59 @@ impl ADACore {
         if let Some(mut record) = self.contact_key_record(&peer) {
             record.verified_at_ms = None;
             record.verified_safety_number = None;
+            record.direct_p2p_allowed = false;
             self.save_contact_key_record(&peer, &record)?;
+
+            let peer_bytes = peer.0;
+            if let Ok(guard) = self.iroh.try_read() {
+                if let Some(transport) = guard.as_ref().cloned() {
+                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                        handle.spawn(async move {
+                            transport.set_peer_direct_allowed(&peer_bytes, false).await;
+                        });
+                    }
+                }
+            }
         }
         Ok(())
+    }
+
+    /// Explicitly allow or disallow direct P2P (IP-level hole punching) for a peer.
+    pub fn set_peer_direct_p2p_allowed(&self, peer_id_b64: &str, allowed: bool) -> Result<()> {
+        let peer = PeerId::from_base64(peer_id_b64)?;
+        let bundle = self
+            .id_store
+            .load_peer_bundle(&peer)?
+            .ok_or_else(|| ADAError::Unknown("unknown contact".into()))?;
+
+        let mut record = self.contact_key_record(&peer).unwrap_or_else(|| {
+            ContactKeyRecord::new(&bundle, bundle.ik_binding_verified().unwrap_or(false))
+        });
+        record.direct_p2p_allowed = allowed;
+        self.save_contact_key_record(&peer, &record)?;
+
+        let peer_bytes = peer.0;
+        if let Ok(guard) = self.iroh.try_read() {
+            if let Some(transport) = guard.as_ref().cloned() {
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    handle.spawn(async move {
+                        transport.set_peer_direct_allowed(&peer_bytes, allowed).await;
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Check whether direct P2P is allowed for this peer.
+    pub fn is_peer_direct_p2p_allowed(&self, peer_id_b64: &str) -> bool {
+        let peer = match PeerId::from_base64(peer_id_b64) {
+            Ok(p) => p,
+            Err(_) => return false,
+        };
+        self.contact_key_record(&peer)
+            .map(|r| r.direct_p2p_allowed || r.verified_at_ms.is_some())
+            .unwrap_or(false)
     }
 
     /// Adopt a pending key change after the user confirmed the new safety number.
@@ -9230,6 +9309,37 @@ mod tests {
         let json: serde_json::Value =
             serde_json::from_str(&core.get_contact_security_json(&peer_b64)).expect("valid json");
         assert!(!json["verified"].as_bool().expect("verified flag"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn direct_p2p_is_relay_only_by_default_and_allows_when_trusted() {
+        let (core, _dir) = core_with_contacts().await;
+        let bob = Identity::generate("Bob");
+        core.add_contact(bob.public_bundle()).expect("import");
+        let peer_b64 = bob.peer_id.to_base64();
+
+        // 1. By default: newly imported contact is untrusted, direct P2P is forbidden (Relay-Only)
+        assert!(!core.is_peer_direct_p2p_allowed(&peer_b64));
+        let json: serde_json::Value =
+            serde_json::from_str(&core.get_contact_security_json(&peer_b64)).expect("valid json");
+        assert!(!json["direct_p2p_allowed"].as_bool().expect("direct_p2p_allowed"));
+
+        // 2. Mark verified: auto-enables direct P2P
+        core.mark_contact_verified(&peer_b64).expect("verify");
+        assert!(core.is_peer_direct_p2p_allowed(&peer_b64));
+        let json: serde_json::Value =
+            serde_json::from_str(&core.get_contact_security_json(&peer_b64)).expect("valid json");
+        assert!(json["direct_p2p_allowed"].as_bool().expect("direct_p2p_allowed"));
+
+        // 3. Clear verification: auto-disables direct P2P (reverts to Relay-Only)
+        core.clear_contact_verified(&peer_b64).expect("clear");
+        assert!(!core.is_peer_direct_p2p_allowed(&peer_b64));
+
+        // 4. Explicit toggle via set_peer_direct_p2p_allowed
+        core.set_peer_direct_p2p_allowed(&peer_b64, true).expect("enable explicit");
+        assert!(core.is_peer_direct_p2p_allowed(&peer_b64));
+        core.set_peer_direct_p2p_allowed(&peer_b64, false).expect("disable explicit");
+        assert!(!core.is_peer_direct_p2p_allowed(&peer_b64));
     }
 
     #[tokio::test(flavor = "multi_thread")]

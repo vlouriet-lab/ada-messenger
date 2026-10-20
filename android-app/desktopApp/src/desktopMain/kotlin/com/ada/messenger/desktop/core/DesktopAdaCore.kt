@@ -207,6 +207,8 @@ class DesktopAdaCore private constructor(private val handle: Long) {
     private external fun nativeListContactSecurityJson(handle: Long): String?
     private external fun nativeMarkContactVerified(handle: Long, peerIdB64: String): Int
     private external fun nativeClearContactVerified(handle: Long, peerIdB64: String): Int
+    private external fun nativeSetPeerDirectP2PAllowed(handle: Long, peerIdB64: String, allowed: Boolean): Int
+    private external fun nativeIsPeerDirectP2PAllowed(handle: Long, peerIdB64: String): Boolean
     private external fun nativeAcceptContactKeyChange(handle: Long, peerIdB64: String): Int
     private external fun nativeRejectContactKeyChange(handle: Long, peerIdB64: String): Int
     private external fun nativeAddRelayNode(handle: Long, relayUrl: String): Int
@@ -441,6 +443,12 @@ class DesktopAdaCore private constructor(private val handle: Long) {
 
     fun clearContactVerified(peerIdB64: String): Boolean =
         withHandle { nativeClearContactVerified(it, peerIdB64) == 0 } ?: false
+
+    fun setPeerDirectP2PAllowed(peerIdB64: String, allowed: Boolean): Boolean =
+        withHandle { nativeSetPeerDirectP2PAllowed(it, peerIdB64, allowed) == 0 } ?: false
+
+    fun isPeerDirectP2PAllowed(peerIdB64: String): Boolean =
+        withHandle { nativeIsPeerDirectP2PAllowed(it, peerIdB64) } ?: false
 
     fun acceptContactKeyChange(peerIdB64: String): Boolean =
         withHandle { nativeAcceptContactKeyChange(it, peerIdB64) == 0 } ?: false
