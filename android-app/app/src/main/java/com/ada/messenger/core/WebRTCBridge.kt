@@ -837,9 +837,7 @@ class WebRTCBridge(
         val session = sessionForCall(callIdHex) ?: sessionForPeer(peerIdB64) ?: return
         synchronized(sessionsLock) {
             if (session.remoteDescriptionSet) {
-                scope.launch {
-                    session.peerConnection.addIceCandidate(ice)
-                }
+                session.peerConnection.addIceCandidate(ice)
             } else {
                 session.pendingRemoteIceCandidates.add(ice)
                 Log.d(TAG, "ICE candidate buffered for ${session.peerId} (remoteDesc not set yet), total=${session.pendingRemoteIceCandidates.size}")

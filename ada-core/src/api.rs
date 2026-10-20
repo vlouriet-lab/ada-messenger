@@ -64,7 +64,7 @@ const SYNC_MESSAGES_PER_RESPONSE_MAX: usize = 128;
 /// Max window scanned locally when building sync diff.
 const SYNC_MESSAGES_SCAN_WINDOW: usize = SYNC_MESSAGES_PER_RESPONSE_MAX * 4;
 /// Timeout budget for quick iroh attempt before switching to bridge path.
-const IROH_FAST_FAILOVER_TIMEOUT_MS: u64 = 1_500;
+const IROH_FAST_FAILOVER_TIMEOUT_MS: u64 = 3_000;
 const BRIDGE_HTTP_MAILBOX_TIMEOUT_SECS: u64 = 15;
 /// Per-request budget when fetching bridge manifests.
 ///
@@ -3515,44 +3515,45 @@ impl ADACore {
     }
 
     async fn try_deliver_via_iroh(&self, peer: &PeerId, wire_bytes: Vec<u8>) -> bool {
-        let guard = self.iroh.read().await;
-        if let Some(iroh) = guard.as_ref() {
-            if iroh.is_connected(&peer.0).await {
-                match iroh.send(&peer.0, wire_bytes.clone()).await {
-                    Ok(()) => {
-                        self.iroh_consecutive_failures
-                            .store(0, std::sync::atomic::Ordering::Relaxed);
+        for _retry_attempt in 0..3 {
+            let sent = {
+                let guard = self.iroh.read().await;
+                if let Some(iroh) = guard.as_ref() {
+                    if iroh.is_connected(&peer.0).await {
+                        if iroh.send(&peer.0, wire_bytes.clone()).await.is_ok() {
+                            self.iroh_consecutive_failures.store(0, std::sync::atomic::Ordering::Relaxed);
+                            return true;
+                        }
+                    }
+                    if iroh.send(&peer.0, wire_bytes.clone()).await.is_ok() {
+                        self.iroh_consecutive_failures.store(0, std::sync::atomic::Ordering::Relaxed);
                         return true;
                     }
-                    Err(e) => {
-                        tracing::debug!("iroh cached send failed ({}), trying cold connect", e);
-                    }
                 }
-            }
-
-            if iroh.send(&peer.0, wire_bytes).await.is_ok() {
-                self.iroh_consecutive_failures
-                    .store(0, std::sync::atomic::Ordering::Relaxed);
+                false
+            };
+            if sent {
                 return true;
             }
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
         }
 
         // iroh delivery failed — track consecutive failures.
-        let prev = self
-            .iroh_consecutive_failures
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if self.online_peers.write().remove(&peer.0) {
+            let peer_id = peer.clone();
+            let tx = self.event_tx.clone();
+            tokio::spawn(async move {
+                let _ = tx.send(ADAEvent::PeerOffline(peer_id)).await;
+            });
+        }
+        let prev = self.iroh_consecutive_failures.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if prev + 1 >= IROH_CONSECUTIVE_FAIL_THRESHOLD {
-            tracing::warn!(
-                "iroh: {} consecutive send failures — emitting NetworkDisconnected",
-                prev + 1,
-            );
+            tracing::warn!("iroh: {} consecutive send failures — emitting NetworkDisconnected", prev + 1);
             self.mark_connection_degraded();
             let _ = self.event_tx.send(ADAEvent::NetworkDisconnected).await;
         }
-
         false
     }
-
     async fn try_deliver_via_bridge(
         &self,
         peer: &PeerId,
@@ -6731,6 +6732,12 @@ impl ADACore {
     }
 
     async fn run_maintenance(&self) {
+        // Ping iroh QUIC active connections to ensure they are actually alive.
+        if let Some(iroh) = self.iroh.read().await.as_ref() {
+            for peer_id in iroh.connected_peer_ids().await {
+                let _ = iroh.warmup_connection(&peer_id).await;
+            }
+        }
         tracing::debug!("Running ADA maintenance cycle");
 
         let in_background = self
