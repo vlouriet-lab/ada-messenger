@@ -26,12 +26,26 @@ data class StoredIdentityMeta(
 class DesktopIdentityStore private constructor(private val baseDir: Path) {
     private val metaPath = baseDir.resolve("identity.json")
     private val pinUnlockPath = baseDir.resolve("pin_unlock.json")
+    private val pinVaultPath = baseDir.resolve("pin_vault.bin")
+    private val protocolAnchorPath = baseDir.resolve("protocol_device_anchor.bin")
     val coreDataDir: Path = baseDir.resolve("core")
 
     init {
         Files.createDirectories(baseDir)
         Files.createDirectories(coreDataDir)
     }
+
+    private fun getOrCreateProtocolAnchor(): ByteArray {
+        if (Files.isRegularFile(protocolAnchorPath)) {
+            val bytes = Files.readAllBytes(protocolAnchorPath)
+            if (bytes.size == 32) return bytes
+        }
+        val fresh = ByteArray(32).also(SecureRandom()::nextBytes)
+        Files.createDirectories(baseDir)
+        Files.write(protocolAnchorPath, fresh)
+        return fresh
+    }
+
 
     fun hasStoredIdentity(): Boolean = Files.isRegularFile(metaPath)
 
@@ -78,12 +92,25 @@ class DesktopIdentityStore private constructor(private val baseDir: Path) {
         )
     }
 
-    fun isPinEnabled(): Boolean = Files.isRegularFile(pinUnlockPath)
+    fun isPinEnabled(): Boolean = Files.isRegularFile(pinVaultPath) || Files.isRegularFile(pinUnlockPath)
 
     fun enablePin(pin: String, patternCells: ByteArray) {
         require(pin.length == 4 && pin.all(Char::isDigit)) { "PIN должен быть ровно из 4 цифр" }
         require(patternCells.size == 32) { "expected 32 pattern bytes" }
 
+        val anchor = getOrCreateProtocolAnchor()
+        val sealed = runCatching {
+            DesktopAdaCore.pinVaultSeal(pin, anchor, patternCells)
+        }.getOrNull()
+
+        if (sealed != null) {
+            Files.createDirectories(baseDir)
+            Files.write(pinVaultPath, sealed)
+            Files.deleteIfExists(pinUnlockPath)
+            return
+        }
+
+        // Fallback to legacy scheme if native core is not available
         val salt = ByteArray(16).also(SecureRandom()::nextBytes)
         val keyBytes = derivePinKey(pin, salt)
         try {
@@ -104,40 +131,64 @@ class DesktopIdentityStore private constructor(private val baseDir: Path) {
     }
 
     fun disablePin() {
+        Files.deleteIfExists(pinVaultPath)
         Files.deleteIfExists(pinUnlockPath)
     }
 
     /** Removes the identity metadata and PIN unlock file. Does not touch the core data directory. */
     fun deleteAll() {
         Files.deleteIfExists(metaPath)
+        Files.deleteIfExists(pinVaultPath)
         Files.deleteIfExists(pinUnlockPath)
     }
 
     fun decryptCellsWithPin(pin: String): ByteArray? {
         if (!isPinEnabled()) return null
-        return runCatching {
-            val json = JSONObject(Files.readString(pinUnlockPath))
-            if (json.optInt("version", 0) != PIN_UNLOCK_VERSION) {
-                error("Unsupported PIN unlock payload version")
-            }
 
-            val salt = Base64.getDecoder().decode(json.getString("salt"))
-            val iv = Base64.getDecoder().decode(json.getString("iv"))
-            val ciphertext = Base64.getDecoder().decode(json.getString("ciphertext"))
-            val keyBytes = derivePinKey(pin, salt)
-            try {
-                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-                cipher.init(
-                    Cipher.DECRYPT_MODE,
-                    SecretKeySpec(keyBytes, "AES"),
-                    GCMParameterSpec(PIN_GCM_TAG_BITS, iv),
-                )
-                cipher.doFinal(ciphertext)
-            } finally {
-                keyBytes.fill(0)
+        if (Files.isRegularFile(pinVaultPath)) {
+            val anchor = getOrCreateProtocolAnchor()
+            val sealedBytes = Files.readAllBytes(pinVaultPath)
+            val unsealed = runCatching {
+                DesktopAdaCore.pinVaultUnseal(pin, anchor, sealedBytes)
+            }.getOrNull()
+            if (unsealed != null) return unsealed
+        }
+
+        if (Files.isRegularFile(pinUnlockPath)) {
+            val legacyCells = runCatching {
+                val json = JSONObject(Files.readString(pinUnlockPath))
+                if (json.optInt("version", 0) != PIN_UNLOCK_VERSION) {
+                    error("Unsupported PIN unlock payload version")
+                }
+
+                val salt = Base64.getDecoder().decode(json.getString("salt"))
+                val iv = Base64.getDecoder().decode(json.getString("iv"))
+                val ciphertext = Base64.getDecoder().decode(json.getString("ciphertext"))
+                val keyBytes = derivePinKey(pin, salt)
+                try {
+                    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                    cipher.init(
+                        Cipher.DECRYPT_MODE,
+                        SecretKeySpec(keyBytes, "AES"),
+                        GCMParameterSpec(PIN_GCM_TAG_BITS, iv),
+                    )
+                    cipher.doFinal(ciphertext)
+                } finally {
+                    keyBytes.fill(0)
+                }
+            }.getOrNull()
+
+            if (legacyCells != null && legacyCells.size == 32) {
+                runCatching {
+                    enablePin(pin, legacyCells)
+                }
             }
-        }.getOrNull()
+            return legacyCells
+        }
+
+        return null
     }
+
 
     private fun derivePinKey(pin: String, salt: ByteArray): ByteArray {
         val pinChars = pin.toCharArray()

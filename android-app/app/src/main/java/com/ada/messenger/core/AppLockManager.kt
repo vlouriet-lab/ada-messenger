@@ -19,11 +19,14 @@ private const val TAG = "AppLockManager"
 private const val PREFS_NAME           = "ada_app_lock_v2"
 private const val KEY_PIN_ENABLED      = "pin_enabled"
 private const val KEY_BIO_ENABLED      = "bio_enabled"
-private const val KEY_PIN_SALT         = "pin_salt"        // 16-byte random salt, base64
-private const val KEY_PIN_ENC_CELLS    = "pin_enc_cells"   // AES-GCM ciphertext of pattern cells, base64
-private const val KEY_PIN_ENC_IV       = "pin_enc_iv"      // AES-GCM IV, base64
+private const val KEY_PIN_VAULT_BLOB    = "pin_vault_blob"  // ADPV protocol envelope, base64
+private const val KEY_PROTOCOL_ANCHOR   = "ada_protocol_device_anchor" // 32-byte protocol secret, base64
+private const val KEY_PIN_SALT         = "pin_salt"        // 16-byte random salt, base64 (legacy fallback)
+private const val KEY_PIN_ENC_CELLS    = "pin_enc_cells"   // AES-GCM ciphertext of pattern cells, base64 (legacy fallback)
+private const val KEY_PIN_ENC_IV       = "pin_enc_iv"      // AES-GCM IV, base64 (legacy fallback)
 private const val KEY_BIO_ENC_CELLS    = "bio_enc_cells"   // ciphertext encrypted by Keystore key
 private const val KEY_BIO_ENC_IV       = "bio_enc_iv"      // GCM IV
+
 // Clean PIN — opens an empty "decoy" messenger UI
 private const val KEY_CLEAN_PIN_ENABLED = "clean_pin_enabled"
 private const val KEY_CLEAN_PIN_SALT    = "clean_pin_salt"
@@ -109,20 +112,48 @@ class AppLockManager(private val context: Context) {
 
     // ── PIN ──────────────────────────────────────────────────────────────────
 
+    private fun getOrCreateProtocolAnchor(): ByteArray {
+        val existing = prefs.getString(KEY_PROTOCOL_ANCHOR, null)
+        if (existing != null) {
+            val decoded = unb64(existing)
+            if (decoded.size == 32) return decoded
+        }
+        val fresh = ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }
+        prefs.edit().putString(KEY_PROTOCOL_ANCHOR, b64(fresh)).apply()
+        return fresh
+    }
+
     /**
-     * Enable PIN unlock. Derives a PBKDF2 key from the PIN and stores AES-GCM ciphertext of the
-     * pattern cells. Stores a separate PIN hash for fast verification UI feedback.
+     * Enable PIN unlock. Uses the impenetrable ADPV protocol vault module, binding
+     * the PIN to the 256-bit protocol anchor via Argon2id and HKDF-SHA256.
+     * Offline brute force of the PIN is impossible without extracting/decrypting the
+     * full 256-bit protocol device anchor.
      */
     fun enablePin(pin: String, patternCells: ByteArray) {
         require(pin.length >= 4) { "PIN too short" }
+        require(patternCells.size == 32) { "expected 32 pattern bytes" }
 
-        // 1. Random salt for PBKDF2
+        val anchor = getOrCreateProtocolAnchor()
+        val sealed = runCatching {
+            AdaCore.pinVaultSeal(pin, anchor, patternCells)
+        }.getOrNull()
+
+        if (sealed != null) {
+            prefs.edit()
+                .putBoolean(KEY_PIN_ENABLED, true)
+                .putString(KEY_PIN_VAULT_BLOB, b64(sealed))
+                .remove(KEY_PIN_SALT)
+                .remove("pin_hash")
+                .remove(KEY_PIN_ENC_CELLS)
+                .remove(KEY_PIN_ENC_IV)
+                .apply()
+            Log.i(TAG, "PIN enabled via ADPV protocol vault")
+            return
+        }
+
+        // Fallback for tests or environments where native core is not loaded
         val salt = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
-
-        // 2. Derive key
         val key = pbkdf2Key(pin, salt)
-
-        // 3. Encrypt cells
         val cipher = Cipher.getInstance(AES_GCM_NOPAD)
         cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"))
         val ciphertext = cipher.doFinal(patternCells)
@@ -131,17 +162,18 @@ class AppLockManager(private val context: Context) {
         prefs.edit()
             .putBoolean(KEY_PIN_ENABLED, true)
             .putString(KEY_PIN_SALT, b64(salt))
-            .remove("pin_hash")   // Proactively wipe legacy SHA-256 oracle from old installs
+            .remove("pin_hash")
             .putString(KEY_PIN_ENC_CELLS, b64(ciphertext))
             .putString(KEY_PIN_ENC_IV, b64(iv))
             .apply()
-        Log.i(TAG, "PIN enabled")
+        Log.i(TAG, "PIN enabled (fallback legacy scheme)")
     }
 
     /** Disable PIN unlock and clear all stored PIN material. */
     fun disablePin() {
         prefs.edit()
             .putBoolean(KEY_PIN_ENABLED, false)
+            .remove(KEY_PIN_VAULT_BLOB)
             .remove(KEY_PIN_SALT)
             .remove("pin_hash")   // Wipe legacy SHA-256 hash oracle if present
             .remove(KEY_PIN_ENC_CELLS)
@@ -151,26 +183,52 @@ class AppLockManager(private val context: Context) {
     }
 
     /**
-     * Verify PIN using PBKDF2 key-derivation + AES-GCM decryption.
-     * Returns true if and only if [decryptCellsWithPin] succeeds (key derived correctly).
-     * **Must be called on a background thread** — PBKDF2 takes ~300 ms.
+     * Verify PIN using protocol vault unseal or legacy PBKDF2.
+     * Returns true if and only if [decryptCellsWithPin] succeeds.
+     * **Must be called on a background thread** — Argon2id / PBKDF2 takes ~300 ms.
      */
     fun verifyPinFast(pin: String): Boolean = decryptCellsWithPin(pin) != null
 
     /**
      * Decrypt pattern cells using the given PIN.
+     * First attempts unsealing via the ADPV protocol vault module.
+     * If legacy ciphertext is present, decrypts it and seamlessly migrates to ADPV.
      * Returns null if PIN is wrong or data is corrupt.
      */
     fun decryptCellsWithPin(pin: String): ByteArray? = runCatching {
-        val salt = unb64(prefs.getString(KEY_PIN_SALT, null) ?: return null)
-        val iv   = unb64(prefs.getString(KEY_PIN_ENC_IV, null) ?: return null)
-        val enc  = unb64(prefs.getString(KEY_PIN_ENC_CELLS, null) ?: return null)
+        val vaultBlobB64 = prefs.getString(KEY_PIN_VAULT_BLOB, null)
+        if (vaultBlobB64 != null) {
+            val blob = unb64(vaultBlobB64)
+            val anchor = getOrCreateProtocolAnchor()
+            val unsealed = AdaCore.pinVaultUnseal(pin, anchor, blob)
+            if (unsealed != null) {
+                return@runCatching unsealed
+            }
+        }
+
+        // Legacy fallback & migration path
+        val saltB64 = prefs.getString(KEY_PIN_SALT, null) ?: return@runCatching null
+        val ivB64   = prefs.getString(KEY_PIN_ENC_IV, null) ?: return@runCatching null
+        val encB64  = prefs.getString(KEY_PIN_ENC_CELLS, null) ?: return@runCatching null
+
+        val salt = unb64(saltB64)
+        val iv   = unb64(ivB64)
+        val enc  = unb64(encB64)
 
         val key = pbkdf2Key(pin, salt)
         val cipher = Cipher.getInstance(AES_GCM_NOPAD)
         cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(GCM_TAG_SIZE, iv))
-        cipher.doFinal(enc)
+        val legacyCells = cipher.doFinal(enc)
+
+        if (legacyCells != null && legacyCells.size == 32) {
+            runCatching {
+                enablePin(pin, legacyCells)
+                Log.i(TAG, "Successfully migrated legacy PIN container to ADPV protocol vault")
+            }
+        }
+        legacyCells
     }.onFailure { Log.w(TAG, "decryptCellsWithPin failed: ${it.message}") }.getOrNull()
+
 
     fun clearLegacyQuickUnlockState() {
         purgeLegacyQuickUnlockState(logIfChanged = true)

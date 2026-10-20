@@ -41,8 +41,10 @@
     <string name="error_pattern_too_many_attempts">Слишком много попыток. Подождите %d секунд.</string>
     <string name="error_pattern_incorrect_attempt">Неверный узор (попытка %d из 3).</string>
     <string name="error_pattern_wrong_cell_count">Выберите ровно 16 ячеек</string>
+    <string name="error_pattern_too_few_colors">Узор слишком простой. Используйте как минимум 3 разных цвета.</string>
     <string name="error_pattern_mismatch">Узор или цвета не совпадают. Попробуйте ещё раз.</string>
     <string name="error_pattern_mismatch_hint">Повторите ваш узор в точности, включая цвета.</string>
+
     <string name="error_pin_too_many_attempts">Слишком много попыток. Подождите</string>
     <string name="error_pin_incorrect_attempt">Неверный PIN (попытка %d из 3)</string>
 

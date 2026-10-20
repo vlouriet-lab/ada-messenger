@@ -139,7 +139,7 @@ fun PatternRegistrationScreen(
                     when (currentStep) {
                         RegStep.DRAW -> RegistrationDrawStep(
                             title = "Создание профиля",
-                            subtitle = "Выберите цвет в палитре и отметьте 16 ячеек.",
+                            subtitle = "Выберите цвет в палитре и отметьте 16 ячеек (минимум 3 разных цвета).",
                             cells = firstPattern,
                             activeColor = activeColor,
                             onColorSelect = { activeColor = it },
@@ -159,10 +159,16 @@ fun PatternRegistrationScreen(
                             },
                             onPrimary = {
                                 if (firstPattern.size == PATTERN_CUBES) {
-                                    confirmPattern = emptyMap()
-                                    localError = null
-                                    onClearError()
-                                    step = RegStep.CONFIRM
+                                    val distinctColors = firstPattern.values.toSet().size
+                                    if (distinctColors < 3) {
+                                        localError = "Узор слишком простой. Используйте как минимум 3 разных цвета."
+                                        shakeError = true
+                                    } else {
+                                        confirmPattern = emptyMap()
+                                        localError = null
+                                        onClearError()
+                                        step = RegStep.CONFIRM
+                                    }
                                 } else {
                                     localError = "Нужно выбрать ровно 16 кубиков"
                                     shakeError = true
@@ -177,6 +183,7 @@ fun PatternRegistrationScreen(
                             primaryLabel = "Далее",
                             secondaryLabel = "Очистить",
                         )
+
 
                         RegStep.CONFIRM -> RegistrationDrawStep(
                             title = "Подтверждение",

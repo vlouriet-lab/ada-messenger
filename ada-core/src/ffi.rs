@@ -3838,6 +3838,121 @@ pub unsafe extern "C" fn ada_verify_pattern(
     }
 }
 
+/// Validate whether pattern cells satisfy new registration complexity requirements (>= 3 distinct colors).
+///
+/// Returns:
+///   0: Valid pattern (16 cubes, valid range, unique cells, >= 3 distinct colors)
+///  -1: Format error (invalid length or cell/color out of bounds)
+///  -2: Too few colors (< 3 distinct colors used)
+#[no_mangle]
+pub unsafe extern "C" fn ada_pattern_validate_registration(
+    cells: *const u8,
+    cells_len: usize,
+) -> c_int {
+    if cells.is_null() || cells_len != crate::pattern_auth::PATTERN_KEY_BYTES {
+        return -1;
+    }
+    let slice = std::slice::from_raw_parts(cells, cells_len);
+    let pattern = match crate::pattern_auth::PatternKey::from_bytes(slice) {
+        Ok(p) => p,
+        Err(_) => return -1,
+    };
+    if pattern.distinct_colors() < crate::pattern_auth::PatternKey::MIN_REGISTRATION_DISTINCT_COLORS {
+        return -2;
+    }
+    0
+}
+
+/// Free a byte buffer allocated by ADA Core FFI.
+#[no_mangle]
+pub unsafe extern "C" fn ada_bytes_free(ptr: *mut u8, len: usize) {
+    if !ptr.is_null() && len > 0 {
+        let slice = std::slice::from_raw_parts_mut(ptr, len);
+        let _ = Box::from_raw(slice as *mut [u8]);
+    }
+}
+
+/// Seal sensitive bytes into an ADPV protocol envelope.
+/// Returns pointer to heap-allocated byte buffer, or null on error.
+/// Caller must free buffer using `ada_bytes_free`.
+#[no_mangle]
+pub unsafe extern "C" fn ada_pin_vault_seal(
+    pin: *const c_char,
+    anchor: *const u8,
+    anchor_len: usize,
+    data: *const u8,
+    data_len: usize,
+    out_len: *mut usize,
+) -> *mut u8 {
+    if pin.is_null() || anchor.is_null() || anchor_len != 32 || data.is_null() || data_len == 0 || out_len.is_null() {
+        return std::ptr::null_mut();
+    }
+    let pin_str = match CStr::from_ptr(pin).to_str() {
+        Ok(s) => s,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let anchor_arr: &[u8; 32] = match std::slice::from_raw_parts(anchor, 32).try_into() {
+        Ok(a) => a,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let data_slice = std::slice::from_raw_parts(data, data_len);
+
+    match crate::crypto::pin_vault::seal(pin_str, anchor_arr, data_slice) {
+        Ok(sealed) => {
+            *out_len = sealed.len();
+            let mut boxed = sealed.into_boxed_slice();
+            let ptr = boxed.as_mut_ptr();
+            std::mem::forget(boxed);
+            ptr
+        }
+        Err(e) => {
+            log::error!("ada_pin_vault_seal failed: {e:?}");
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Unseal an ADPV protocol envelope.
+/// Returns pointer to heap-allocated byte buffer, or null on error.
+/// Caller must free buffer using `ada_bytes_free`.
+#[no_mangle]
+pub unsafe extern "C" fn ada_pin_vault_unseal(
+    pin: *const c_char,
+    anchor: *const u8,
+    anchor_len: usize,
+    envelope: *const u8,
+    envelope_len: usize,
+    out_len: *mut usize,
+) -> *mut u8 {
+    if pin.is_null() || anchor.is_null() || anchor_len != 32 || envelope.is_null() || envelope_len < crate::crypto::pin_vault::PIN_VAULT_HEADER_LEN || out_len.is_null() {
+        return std::ptr::null_mut();
+    }
+    let pin_str = match CStr::from_ptr(pin).to_str() {
+        Ok(s) => s,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let anchor_arr: &[u8; 32] = match std::slice::from_raw_parts(anchor, 32).try_into() {
+        Ok(a) => a,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let env_slice = std::slice::from_raw_parts(envelope, envelope_len);
+
+    match crate::crypto::pin_vault::unseal(pin_str, anchor_arr, env_slice) {
+        Ok(unsealed) => {
+            *out_len = unsealed.len();
+            let mut boxed = unsealed.into_boxed_slice();
+            let ptr = boxed.as_mut_ptr();
+            std::mem::forget(boxed);
+            ptr
+        }
+        Err(e) => {
+            log::error!("ada_pin_vault_unseal failed: {e:?}");
+            std::ptr::null_mut()
+        }
+    }
+}
+
+
 /// Save a peer's public bundle from the QR contact card JSON.
 ///
 /// Parses the JSON produced by `ada_get_contact_card_json` (v2 format) and stores the

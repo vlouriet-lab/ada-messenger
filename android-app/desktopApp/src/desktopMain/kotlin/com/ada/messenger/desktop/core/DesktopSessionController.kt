@@ -101,6 +101,10 @@ class DesktopSessionController(
             setPatternError("Нужно выбрать ровно 16 кубиков")
             return
         }
+        if (!DesktopAdaCore.patternValidateRegistration(cells)) {
+            setPatternError("Узор слишком простой. Используйте как минимум 3 разных цвета.")
+            return
+        }
         if (trimmedName.isBlank()) {
             setPatternError("Введите отображаемое имя")
             return
@@ -109,6 +113,7 @@ class DesktopSessionController(
             setPatternError("PIN должен состоять ровно из 4 цифр")
             return
         }
+
 
         scope.launch {
             _state.update {

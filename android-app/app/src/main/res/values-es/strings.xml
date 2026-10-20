@@ -39,8 +39,10 @@
     <string name="error_pattern_too_many_attempts">Demasiados intentos. Espere %d segundos.</string>
     <string name="error_pattern_incorrect_attempt">Patrón incorrecto (intento %d de 3). </string>
     <string name="error_pattern_wrong_cell_count">Seleccione exactamente 16 celdas</string>
+    <string name="error_pattern_too_few_colors">El patrón es demasiado simple. Usa al menos 3 colores diferentes.</string>
     <string name="error_pattern_mismatch">El patrón o los colores no coinciden. Inténtelo de nuevo.</string>
     <string name="error_pattern_mismatch_hint">Repita exactamente su patrón, incluyendo los colores.</string>
+
     <string name="error_pin_too_many_attempts">Demasiados intentos. Espere </string>
     <string name="error_pin_incorrect_attempt">PIN incorrecto (intento %d de 3)</string>
 

@@ -836,6 +836,151 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeFree(
     crate::ffi::ada_core_free(handle as *mut AdaCoreHandle);
 }
 
+// ─── Pattern & PIN Vault ──────────────────────────────────────────────────────
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativePatternValidateRegistration(
+    env: JNIEnv,
+    _class: JClass,
+    cells: JByteArray,
+) -> jint {
+    let cells_u8 = match env.convert_byte_array(&cells) {
+        Ok(b) => b,
+        Err(_) => return -1,
+    };
+    crate::ffi::ada_pattern_validate_registration(cells_u8.as_ptr(), cells_u8.len())
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativePatternValidateRegistration(
+    env: JNIEnv,
+    class: JClass,
+    cells: JByteArray,
+) -> jint {
+    Java_com_ada_messenger_core_AdaCore_nativePatternValidateRegistration(env, class, cells)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativePinVaultSeal(
+    mut env: JNIEnv,
+    _class: JClass,
+    pin: JString,
+    anchor: JByteArray,
+    cells: JByteArray,
+) -> jni::sys::jbyteArray {
+    let pin_str: String = match env.get_string(&pin) {
+        Ok(s) => s.into(),
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let pin_c = match CString::new(pin_str) {
+        Ok(s) => s,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let anchor_u8 = match env.convert_byte_array(&anchor) {
+        Ok(b) => b,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let cells_u8 = match env.convert_byte_array(&cells) {
+        Ok(b) => b,
+        Err(_) => return std::ptr::null_mut(),
+    };
+
+    let mut out_len = 0usize;
+    let ptr = crate::ffi::ada_pin_vault_seal(
+        pin_c.as_ptr(),
+        anchor_u8.as_ptr(),
+        anchor_u8.len(),
+        cells_u8.as_ptr(),
+        cells_u8.len(),
+        &mut out_len,
+    );
+
+    if ptr.is_null() || out_len == 0 {
+        return std::ptr::null_mut();
+    }
+
+    let slice = std::slice::from_raw_parts(ptr, out_len);
+    let result = env.byte_array_from_slice(slice);
+    crate::ffi::ada_bytes_free(ptr, out_len);
+
+    match result {
+        Ok(arr) => arr.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativePinVaultSeal(
+    env: JNIEnv,
+    class: JClass,
+    pin: JString,
+    anchor: JByteArray,
+    cells: JByteArray,
+) -> jni::sys::jbyteArray {
+    Java_com_ada_messenger_core_AdaCore_nativePinVaultSeal(env, class, pin, anchor, cells)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativePinVaultUnseal(
+    mut env: JNIEnv,
+    _class: JClass,
+    pin: JString,
+    anchor: JByteArray,
+    envelope: JByteArray,
+) -> jni::sys::jbyteArray {
+    let pin_str: String = match env.get_string(&pin) {
+        Ok(s) => s.into(),
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let pin_c = match CString::new(pin_str) {
+        Ok(s) => s,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let anchor_u8 = match env.convert_byte_array(&anchor) {
+        Ok(b) => b,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let env_u8 = match env.convert_byte_array(&envelope) {
+        Ok(b) => b,
+        Err(_) => return std::ptr::null_mut(),
+    };
+
+    let mut out_len = 0usize;
+    let ptr = crate::ffi::ada_pin_vault_unseal(
+        pin_c.as_ptr(),
+        anchor_u8.as_ptr(),
+        anchor_u8.len(),
+        env_u8.as_ptr(),
+        env_u8.len(),
+        &mut out_len,
+    );
+
+    if ptr.is_null() || out_len == 0 {
+        return std::ptr::null_mut();
+    }
+
+    let slice = std::slice::from_raw_parts(ptr, out_len);
+    let result = env.byte_array_from_slice(slice);
+    crate::ffi::ada_bytes_free(ptr, out_len);
+
+    match result {
+        Ok(arr) => arr.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativePinVaultUnseal(
+    env: JNIEnv,
+    class: JClass,
+    pin: JString,
+    anchor: JByteArray,
+    envelope: JByteArray,
+) -> jni::sys::jbyteArray {
+    Java_com_ada_messenger_core_AdaCore_nativePinVaultUnseal(env, class, pin, anchor, envelope)
+}
+
+
 /// Notify the Rust core that the Android network has been restored.
 /// Call from `ConnectivityManager.NetworkCallback.onAvailable()`.
 #[no_mangle]

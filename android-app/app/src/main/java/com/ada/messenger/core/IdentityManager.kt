@@ -1,7 +1,9 @@
 package com.ada.messenger.core
 
 import android.content.Context
+import com.ada.messenger.R
 import android.net.Uri
+
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -124,6 +126,10 @@ class IdentityManager(private val appContext: Context) {
             _patternLoading.value = true
             _patternError.value = null
             try {
+                if (!AdaCore.patternValidateRegistration(cells)) {
+                    _patternError.value = appContext.getString(R.string.error_pattern_too_few_colors)
+                    return@withContext null
+                }
                 val dataDir = appContext.filesDir.absolutePath
                 val name = displayName.trim()
                 val instance = AdaCore.createFromPattern(cells, name, dataDir, connectionProfile)
@@ -131,6 +137,7 @@ class IdentityManager(private val appContext: Context) {
                     _patternError.value = "Не удалось создать профиль. Попробуйте ещё раз."
                     return@withContext null
                 }
+
                 val peerId = instance.getPeerId()
                 saveIdentityMeta(peerId ?: "", name)
                 saveWorkerCredentials(name, dataDir)

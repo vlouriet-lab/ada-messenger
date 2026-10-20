@@ -39,8 +39,10 @@
     <string name="error_pattern_too_many_attempts">Trop de tentatives. Attendez %d secondes.</string>
     <string name="error_pattern_incorrect_attempt">Motif incorrect (tentative %d sur 3). </string>
     <string name="error_pattern_wrong_cell_count">Sélectionnez exactement 16 cellules</string>
+    <string name="error_pattern_too_few_colors">Le motif est trop simple. Utilisez au moins 3 couleurs distinctes.</string>
     <string name="error_pattern_mismatch">Le motif ou les couleurs ne correspondent pas. Réessayez.</string>
     <string name="error_pattern_mismatch_hint">Répétez votre motif exactement, y compris les couleurs.</string>
+
     <string name="error_pin_too_many_attempts">Trop de tentatives. Attendez </string>
     <string name="error_pin_incorrect_attempt">PIN incorrect (tentative %d sur 3)</string>
 

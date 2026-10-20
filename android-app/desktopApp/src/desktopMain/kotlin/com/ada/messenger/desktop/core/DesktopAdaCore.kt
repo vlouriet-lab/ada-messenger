@@ -53,6 +53,50 @@ class DesktopAdaCore private constructor(private val handle: Long) {
         @JvmStatic
         private external fun nativeFree(handle: Long)
 
+        @JvmStatic
+        private external fun nativePatternValidateRegistration(cells: ByteArray): Int
+
+        @JvmStatic
+        private external fun nativePinVaultSeal(
+            pin: String,
+            anchor: ByteArray,
+            cells: ByteArray,
+        ): ByteArray?
+
+        @JvmStatic
+        private external fun nativePinVaultUnseal(
+            pin: String,
+            anchor: ByteArray,
+            envelope: ByteArray,
+        ): ByteArray?
+
+        fun patternValidateRegistration(cells: ByteArray): Boolean {
+            if (cells.size != 32) return false
+            DesktopAdaCoreLoader.ensureLoaded()
+            return nativePatternValidateRegistration(cells) == 0
+        }
+
+        fun pinVaultSeal(
+            pin: String,
+            protocolAnchor: ByteArray,
+            patternCells: ByteArray,
+        ): ByteArray? {
+            if (pin.isBlank() || protocolAnchor.size != 32 || patternCells.isEmpty()) return null
+            DesktopAdaCoreLoader.ensureLoaded()
+            return nativePinVaultSeal(pin, protocolAnchor, patternCells)
+        }
+
+        fun pinVaultUnseal(
+            pin: String,
+            protocolAnchor: ByteArray,
+            vaultBlob: ByteArray,
+        ): ByteArray? {
+            if (pin.isBlank() || protocolAnchor.size != 32 || vaultBlob.isEmpty()) return null
+            DesktopAdaCoreLoader.ensureLoaded()
+            return nativePinVaultUnseal(pin, protocolAnchor, vaultBlob)
+        }
+
+
         fun initTracing(dataDir: String) {
             DesktopAdaCoreLoader.ensureLoaded()
             nativeInitTracing(dataDir, false)

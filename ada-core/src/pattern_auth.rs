@@ -142,7 +142,34 @@ impl PatternKey {
     pub fn cells(&self) -> &[(u8, u8); PATTERN_CUBES] {
         &self.cells
     }
+
+    /// Count distinct colours used across the 16 cubes.
+    pub fn distinct_colors(&self) -> usize {
+        let mut mask = 0u8;
+        for &(_, color) in &self.cells {
+            mask |= 1 << color;
+        }
+        mask.count_ones() as usize
+    }
+
+    /// Minimum number of distinct colours required for new pattern registrations.
+    pub const MIN_REGISTRATION_DISTINCT_COLORS: usize = 3;
+
+    /// Validates whether this pattern meets registration requirements
+    /// (must use at least 3 distinct colours out of 5 to prevent trivial single/dual-color patterns).
+    pub fn validate_registration(&self) -> Result<()> {
+        let distinct = self.distinct_colors();
+        if distinct < Self::MIN_REGISTRATION_DISTINCT_COLORS {
+            return Err(ADAError::Pattern(format!(
+                "pattern is too simple: requires at least {} distinct colors, found {}",
+                Self::MIN_REGISTRATION_DISTINCT_COLORS,
+                distinct
+            )));
+        }
+        Ok(())
+    }
 }
+
 
 // ── Key derivation ────────────────────────────────────────────────────────────
 
@@ -642,4 +669,32 @@ mod tests {
             "the signature must not also validate the unused long-term IK"
         );
     }
+
+    #[test]
+    fn test_pattern_distinct_colors_and_registration_validation() {
+        // 1 color (all color 0)
+        let single_color: Vec<(u8, u8)> = (0..16).map(|i| (i, 0)).collect();
+        let pk1 = PatternKey::new(&single_color).unwrap();
+        assert_eq!(pk1.distinct_colors(), 1);
+        assert!(pk1.validate_registration().is_err());
+
+        // 2 colors (colors 0 and 1)
+        let two_colors: Vec<(u8, u8)> = (0..16).map(|i| (i, i % 2)).collect();
+        let pk2 = PatternKey::new(&two_colors).unwrap();
+        assert_eq!(pk2.distinct_colors(), 2);
+        assert!(pk2.validate_registration().is_err());
+
+        // 3 colors (colors 0, 1, 2) -> valid
+        let three_colors: Vec<(u8, u8)> = (0..16).map(|i| (i, i % 3)).collect();
+        let pk3 = PatternKey::new(&three_colors).unwrap();
+        assert_eq!(pk3.distinct_colors(), 3);
+        assert!(pk3.validate_registration().is_ok());
+
+        // 5 colors (colors 0, 1, 2, 3, 4) -> valid
+        let five_colors: Vec<(u8, u8)> = (0..16).map(|i| (i, i % 5)).collect();
+        let pk5 = PatternKey::new(&five_colors).unwrap();
+        assert_eq!(pk5.distinct_colors(), 5);
+        assert!(pk5.validate_registration().is_ok());
+    }
 }
+

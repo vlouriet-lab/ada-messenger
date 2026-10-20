@@ -83,7 +83,54 @@ class AdaCore private constructor(private val handle: Long) {
                 AdaCore(h)
             }
         }
+
+        // ── Pattern Validation & Protocol PIN Vault ─────────────────────────
+        @JvmStatic private external fun nativePatternValidateRegistration(cells: ByteArray): Int
+        @JvmStatic private external fun nativePinVaultSeal(
+            pin: String,
+            anchor: ByteArray,
+            cells: ByteArray,
+        ): ByteArray?
+        @JvmStatic private external fun nativePinVaultUnseal(
+            pin: String,
+            anchor: ByteArray,
+            envelope: ByteArray,
+        ): ByteArray?
+
+        /**
+         * Validates whether [cells] satisfy new registration complexity rules (>= 3 distinct colors).
+         */
+        fun patternValidateRegistration(cells: ByteArray): Boolean {
+            if (cells.size != 32) return false
+            return nativePatternValidateRegistration(cells) == 0
+        }
+
+        /**
+         * Seal sensitive pattern cells into a protocol-bound ADPV container.
+         * The container requires BOTH [pin] AND the 256-bit [protocolAnchor] to decrypt.
+         */
+        fun pinVaultSeal(
+            pin: String,
+            protocolAnchor: ByteArray,
+            patternCells: ByteArray,
+        ): ByteArray? {
+            if (pin.isBlank() || protocolAnchor.size != 32 || patternCells.isEmpty()) return null
+            return nativePinVaultSeal(pin, protocolAnchor, patternCells)
+        }
+
+        /**
+         * Unseal an ADPV container with the user's [pin] and the 256-bit [protocolAnchor].
+         */
+        fun pinVaultUnseal(
+            pin: String,
+            protocolAnchor: ByteArray,
+            vaultBlob: ByteArray,
+        ): ByteArray? {
+            if (pin.isBlank() || protocolAnchor.size != 32 || vaultBlob.isEmpty()) return null
+            return nativePinVaultUnseal(pin, protocolAnchor, vaultBlob)
+        }
     }
+
 
     // ── Identity ───────────────────────────────────────────────────────────
     private external fun nativeGetPeerId(handle: Long): String?

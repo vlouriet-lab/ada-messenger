@@ -77,6 +77,7 @@ fun PatternRegistrationScreen(
 
     var shakeError by remember { mutableStateOf(false) }
     var confirmMismatch by remember { mutableStateOf(false) }
+    var tooFewColorsError by remember { mutableStateOf(false) }
 
     val focusManager = LocalFocusManager.current
 
@@ -145,25 +146,41 @@ fun PatternRegistrationScreen(
                     onCellTap = { idx ->
                         val next = applyCellAction(firstPattern, idx, activeColor)
                         firstPattern = next
+                        tooFewColorsError = false
                         if (next.size > PATTERN_CUBES) shakeError = true
                     },
                     shakeError = shakeError,
-                    onClear = { firstPattern = emptyMap() },
+                    onClear = {
+                        firstPattern = emptyMap()
+                        tooFewColorsError = false
+                    },
                     onNext = {
                         if (firstPattern.size == PATTERN_CUBES) {
-                            step = RegStep.CONFIRM
+                            val distinctColors = firstPattern.values.toSet().size
+                            if (distinctColors < 3) {
+                                tooFewColorsError = true
+                                shakeError = true
+                            } else {
+                                tooFewColorsError = false
+                                step = RegStep.CONFIRM
+                            }
                         } else {
                             shakeError = true
                         }
                     },
                     nextEnabled = firstPattern.size == PATTERN_CUBES,
                     nextLabel = stringResource(R.string.button_next),
-                    hintText = stringResource(R.string.pattern_register_step1_hint),
+                    hintText = if (tooFewColorsError)
+                        stringResource(R.string.error_pattern_too_few_colors)
+                    else
+                        stringResource(R.string.pattern_register_step1_hint),
+                    hintIsError = tooFewColorsError,
                     secondaryActionLabel = onImportRecovery?.let {
                         stringResource(R.string.recovery_import_open_button)
                     },
                     onSecondaryAction = onImportRecovery,
                 )
+
 
                 RegStep.CONFIRM -> DrawStep(
                     title = stringResource(R.string.pattern_register_step2_title),
