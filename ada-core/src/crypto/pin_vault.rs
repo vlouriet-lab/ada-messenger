@@ -62,11 +62,8 @@ pub fn seal(pin: &str, protocol_anchor: &[u8; 32], plaintext: &[u8]) -> Result<V
         return Err(ADAError::Crypto("Plaintext payload cannot be empty".to_string()));
     }
 
-    let mut salt = [0u8; PIN_VAULT_SALT_LEN];
-    rand::rngs::OsRng.fill(&mut salt);
-
-    let mut nonce_bytes = [0u8; PIN_VAULT_NONCE_LEN];
-    rand::rngs::OsRng.fill(&mut nonce_bytes);
+    let salt: [u8; PIN_VAULT_SALT_LEN] = rand::rngs::OsRng.gen();
+    let nonce_bytes: [u8; PIN_VAULT_NONCE_LEN] = rand::rngs::OsRng.gen();
 
     let vault_key = derive_vault_key(pin.as_bytes(), protocol_anchor, &salt)?;
 
