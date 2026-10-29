@@ -658,36 +658,60 @@ impl DpiProbeDefense {
     ///
     /// If authentic DpiMorpher frame: unmasks and returns `ValidTraffic`.
     /// If active scanner probe: generates a plausible decoy response.
-    pub fn process_inbound(&self, packet: &[u8]) -> ProbeDefenseResult {
-        // Attempt normal DpiMorpher unwrapping
-        if let Ok(unwrapped) = self.morpher.unwrap_bytes(packet) {
-            return ProbeDefenseResult::ValidTraffic(unwrapped);
-        }
-
-        // Not valid DpiMorpher traffic — check if it is an active probe!
+    /// Check whether an inbound packet is an active scanner probe.
+    ///
+    /// Returns `Some(decoy_response)` if an active probe is identified, or `None` if
+    /// the packet is a candidate for authentic DpiMorpher traffic.
+    pub fn inspect_probe(&self, packet: &[u8]) -> Option<ProbeDefenseResult> {
         let detected = DetectedProtocol::sniff(packet);
         match detected {
             DetectedProtocol::HttpPlaintext { method, path } => {
                 let decoy_http = self.generate_http_decoy(&method, &path);
-                ProbeDefenseResult::DecoyResponse {
+                Some(ProbeDefenseResult::DecoyResponse {
                     probe_detected: format!("HTTP {} {}", method, path),
                     response_bytes: decoy_http,
-                }
+                })
             }
-            DetectedProtocol::TlsRecord { .. }
-            | DetectedProtocol::UnknownPlaintext
-            | DetectedProtocol::UnstructuredHighEntropy => {
-                // If it looks like a TLS probe or unknown probe, return a realistic TLS Alert
-                // RFC 5246 / RFC 8446: Record Type 0x15 (Alert), Version 0x03 0x03, Length 0x00 0x02, Fatal (0x02), Handshake Failure (0x28)
+            DetectedProtocol::TlsRecord { content_type, .. }
+                if content_type == 22 || content_type == 24 =>
+            {
+                // Active scanner sends TLS Handshake (0x16) or Heartbeat (0x18)
                 let tls_alert_decoy = vec![0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x28];
-                ProbeDefenseResult::DecoyResponse {
-                    probe_detected: "Active TLS/Binary Probe".into(),
+                Some(ProbeDefenseResult::DecoyResponse {
+                    probe_detected: "Active TLS Probe".into(),
                     response_bytes: tls_alert_decoy,
-                }
+                })
             }
-            _ => ProbeDefenseResult::Drop {
-                reason: "Unrecognized non-probe traffic".into(),
-            },
+            DetectedProtocol::UnknownPlaintext | DetectedProtocol::UnstructuredHighEntropy => {
+                let tls_alert_decoy = vec![0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x28];
+                Some(ProbeDefenseResult::DecoyResponse {
+                    probe_detected: "Active Binary Probe".into(),
+                    response_bytes: tls_alert_decoy,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// Process an inbound packet on a listening socket.
+    ///
+    /// If authentic DpiMorpher frame: unmasks and returns `ValidTraffic`.
+    /// If active scanner probe: generates a plausible decoy response.
+    pub fn process_inbound(&self, packet: &[u8]) -> ProbeDefenseResult {
+        // First check for active scanner probes to generate realistic decoy responses
+        if let Some(decoy) = self.inspect_probe(packet) {
+            return decoy;
+        }
+
+        // Only pseudo-TLS Application Data (0x17, 0x03, 0x03) records can be DpiMorpher frames
+        if packet.len() >= 25 && packet.starts_with(&[0x17, 0x03, 0x03]) {
+            if let Ok(unwrapped) = self.morpher.unwrap_bytes(packet) {
+                return ProbeDefenseResult::ValidTraffic(unwrapped);
+            }
+        }
+
+        ProbeDefenseResult::Drop {
+            reason: "Unrecognized or corrupted traffic".into(),
         }
     }
 
@@ -938,7 +962,7 @@ mod tests {
 
         // Active scanner sends HTTP GET probe
         let http_probe = b"GET / HTTP/1.1\r\nHost: example.com\r\nUser-Agent: CensorScanner/1.0\r\n\r\n";
-        let result = defense.process_inbound(http_probe);
+        let result = defense.inspect_probe(http_probe).expect("HTTP probe must be detected");
 
         match result {
             ProbeDefenseResult::DecoyResponse { response_bytes, .. } => {
@@ -952,7 +976,7 @@ mod tests {
 
         // Active scanner probes nonexistent path -> 404
         let http_probe_404 = b"GET /admin.php HTTP/1.1\r\nHost: example.com\r\n\r\n";
-        let result_404 = defense.process_inbound(http_probe_404);
+        let result_404 = defense.inspect_probe(http_probe_404).expect("404 HTTP probe must be detected");
         match result_404 {
             ProbeDefenseResult::DecoyResponse { response_bytes, .. } => {
                 let resp_str = String::from_utf8_lossy(&response_bytes);
@@ -969,7 +993,7 @@ mod tests {
 
         // Scanner sends TLS ClientHello probe or random binary probe
         let raw_probe = [0x16, 0x03, 0x01, 0x00, 0x30, 0x01, 0x00, 0x00];
-        let result = defense.process_inbound(&raw_probe);
+        let result = defense.inspect_probe(&raw_probe).expect("TLS probe must be detected");
 
         match result {
             ProbeDefenseResult::DecoyResponse { response_bytes, .. } => {
