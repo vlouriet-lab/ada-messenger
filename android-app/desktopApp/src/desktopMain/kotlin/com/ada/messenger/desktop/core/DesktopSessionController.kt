@@ -748,8 +748,13 @@ class DesktopSessionController(
     }
 
     fun requestAudioCall() {
+        val groupId = activeGroupId()
+        if (groupId != null) {
+            requestGroupAudioCall(groupId)
+            return
+        }
         if (activeDirectPeerId() == null) {
-            setActionMessage("Звонки доступны только в direct chat.", isError = true)
+            setActionMessage("Выберите контакт или группу для звонка.", isError = true)
             return
         }
         if (_state.value.incomingCall != null) {
@@ -765,8 +770,13 @@ class DesktopSessionController(
     }
 
     fun requestVideoCall() {
+        val groupId = activeGroupId()
+        if (groupId != null) {
+            requestGroupVideoCall(groupId)
+            return
+        }
         if (activeDirectPeerId() == null) {
-            setActionMessage("Видеозвонки доступны только в direct chat.", isError = true)
+            setActionMessage("Выберите контакт или группу для звонка.", isError = true)
             return
         }
         if (_state.value.incomingCall != null) {
@@ -813,10 +823,6 @@ class DesktopSessionController(
 
     fun answerIncomingCall() {
         val incoming = _state.value.incomingCall ?: return
-        if (incoming.groupId != null || incoming.callSessionId != null) {
-            setActionMessage("Групповые звонки на desktop будут подключены отдельным media patch.", isError = true)
-            return
-        }
 
         scope.launch {
             DesktopCallLog.info(
@@ -835,6 +841,14 @@ class DesktopSessionController(
                 hasVideo = incoming.hasVideo,
             )
             if (answerResult.success) {
+                if (incoming.groupId != null && incoming.callSessionId != null) {
+                    activeCore.attachCallToGroupRoom(
+                        incoming.callId,
+                        incoming.groupId,
+                        incoming.callSessionId,
+                        incoming.hasVideo,
+                    )
+                }
                 _state.update { it.copy(incomingCall = null) }
                 refreshFromCore(preferredConversationId = _state.value.activeConversationId)
                 DesktopCallLog.info(
@@ -853,6 +867,34 @@ class DesktopSessionController(
                     "desktop incoming call answer failed id=${incoming.callId} peer=${shortPeerId(incoming.peerId)} reason=${answerResult.error}",
                 )
                 setActionMessage(answerResult.error ?: "Не удалось принять входящий звонок.", isError = true)
+            }
+        }
+    }
+
+    fun requestGroupAudioCall(groupIdHex: String) {
+        val activeCore = core ?: return
+        scope.launch {
+            val sessionId = activeCore.startGroupCall(groupIdHex, "", false)
+            if (sessionId != null) {
+                DesktopCallLog.info("desktop started group audio call in group=$groupIdHex session=$sessionId")
+                setActionMessage("Групповой аудиозвонок начат. Ожидание участников...")
+                refreshFromCore()
+            } else {
+                setActionMessage("Не удалось начать групповой звонок.", isError = true)
+            }
+        }
+    }
+
+    fun requestGroupVideoCall(groupIdHex: String) {
+        val activeCore = core ?: return
+        scope.launch {
+            val sessionId = activeCore.startGroupCall(groupIdHex, "", true)
+            if (sessionId != null) {
+                DesktopCallLog.info("desktop started group video call in group=$groupIdHex session=$sessionId")
+                setActionMessage("Групповая видеоконференция начата. Ожидание участников...")
+                refreshFromCore()
+            } else {
+                setActionMessage("Не удалось начать видеоконференцию.", isError = true)
             }
         }
     }
@@ -1709,6 +1751,11 @@ class DesktopSessionController(
         _state.value.activeConversationId
             ?.takeIf { it.startsWith("d:") }
             ?.removePrefix("d:")
+
+    private fun activeGroupId(): String? =
+        _state.value.activeConversationId
+            ?.takeIf { it.startsWith("g:") }
+            ?.removePrefix("g:")
 
     private fun mediaBridge(): DesktopWebRtcBridge =
         webRtcBridge ?: DesktopWebRtcBridge(

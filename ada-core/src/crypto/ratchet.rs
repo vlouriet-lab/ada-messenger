@@ -295,20 +295,28 @@ impl RatchetState {
 
         // --- Check skipped keys first ---
         let key_id = (hex::encode(header.dh_public), header.message_number);
-        if let Some(mut mk) = self.skipped_keys.remove(&key_id) {
+        if let Some(mk) = self.skipped_keys.get(&key_id) {
             let aad = header_aad(header);
-            let result = decrypt(&mk, &msg.ciphertext, Some(&aad));
-            mk.zeroize(); // zero before returning
+            let result = decrypt(mk, &msg.ciphertext, Some(&aad));
+            if result.is_ok() {
+                if let Some(mut removed) = self.skipped_keys.remove(&key_id) {
+                    removed.zeroize();
+                }
+            }
             return result;
         }
 
+        // Take a working snapshot of the state before attempting ratchet advance and decryption.
+        // This ensures a corrupted, spoofed or out-of-order packet does not destroy our ratchet state.
+        let mut working_state = self.clone();
+
         // --- If DH ratchet key has changed, perform a DH ratchet step ---
-        if header.dh_public != self.dh_remote_public {
+        if header.dh_public != working_state.dh_remote_public {
             // Skip messages in the current receiving chain (if any)
-            self.skip_message_keys(header.prev_chain_len)?;
+            working_state.skip_message_keys(header.prev_chain_len)?;
 
             // Perform DH (+ optional PQ) ratchet
-            self.dh_ratchet_step(
+            working_state.dh_ratchet_step(
                 header.dh_public,
                 header.pq_ratchet_public.as_deref(),
                 header.pq_ratchet_ciphertext.as_deref(),
@@ -316,16 +324,22 @@ impl RatchetState {
         }
 
         // Skip any messages in the current receiving chain before this one
-        self.skip_message_keys(header.message_number)?;
+        working_state.skip_message_keys(header.message_number)?;
 
         // Advance the receiving chain to get the message key
-        let (new_ck, mut mk) = kdf_ck(&self.receiving_chain_key);
-        self.receiving_chain_key = new_ck;
-        self.recv_count += 1;
+        let (new_ck, mut mk) = kdf_ck(&working_state.receiving_chain_key);
+        working_state.receiving_chain_key = new_ck;
+        working_state.recv_count += 1;
 
         let aad = header_aad(header);
         let result = decrypt(&mk, &msg.ciphertext, Some(&aad));
         mk.zeroize();
+
+        // Only commit the state mutations if decryption succeeded
+        if result.is_ok() {
+            *self = working_state;
+        }
+
         result
     }
 

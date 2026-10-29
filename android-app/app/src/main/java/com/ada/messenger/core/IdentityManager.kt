@@ -973,9 +973,28 @@ class IdentityManager(private val appContext: Context) {
     private val BG_PREFS_NAME     = "ada_bg_cells_v1"
     private val BG_PREF_CELLS_IV  = "cells_iv"
     private val BG_PREF_CELLS_ENC = "cells_enc"
+    private val BG_PREF_ZERO_SECRET = "zero_secret_at_rest"
     private val BG_AES_GCM        = "AES/GCM/NoPadding"
     private val BG_KEYSTORE       = "AndroidKeyStore"
     private val BG_TAG_LEN        = 128
+
+    /**
+     * Check if background unlock is allowed.
+     * When Zero-Secret-At-Rest is enabled, background cells are never stored.
+     */
+    fun isBackgroundUnlockAllowed(): Boolean {
+        val prefs = appContext.getSharedPreferences(BG_PREFS_NAME, Context.MODE_PRIVATE)
+        return !prefs.getBoolean(BG_PREF_ZERO_SECRET, false)
+    }
+
+    /** Enable or disable Zero-Secret-At-Rest mode. */
+    fun setZeroSecretAtRest(enabled: Boolean) {
+        val prefs = appContext.getSharedPreferences(BG_PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(BG_PREF_ZERO_SECRET, enabled).commit()
+        if (enabled) {
+            clearBackgroundCells()
+        }
+    }
 
     /**
      * Encrypt [cells] with a hardware-backed Keystore key (no user auth required)
@@ -983,6 +1002,11 @@ class IdentityManager(private val appContext: Context) {
      * Called after every successful authentication.
      */
     fun saveBackgroundCells(cells: ByteArray) {
+        if (!isBackgroundUnlockAllowed()) {
+            Log.d(TAG, "Zero Secret At Rest active: skipping saveBackgroundCells")
+            clearBackgroundCells()
+            return
+        }
         if (cells.isEmpty()) return
         try {
             val key = getBgKeystoreKey()
@@ -1005,6 +1029,10 @@ class IdentityManager(private val appContext: Context) {
      * wiped (factory reset / app reinstall), or on any decryption error.
      */
     fun loadBackgroundCells(): ByteArray? {
+        if (!isBackgroundUnlockAllowed()) {
+            Log.d(TAG, "Zero Secret At Rest active: loadBackgroundCells returns null")
+            return null
+        }
         return try {
             val prefs = appContext.getSharedPreferences(BG_PREFS_NAME, Context.MODE_PRIVATE)
             val ivB64  = prefs.getString(BG_PREF_CELLS_IV,  null) ?: return null
@@ -1026,8 +1054,9 @@ class IdentityManager(private val appContext: Context) {
 
     /** Clear background cells on logout / account wipe. */
     fun clearBackgroundCells() {
-        appContext.getSharedPreferences(BG_PREFS_NAME, Context.MODE_PRIVATE)
-            .edit().clear().commit()
+        val prefs = appContext.getSharedPreferences(BG_PREFS_NAME, Context.MODE_PRIVATE)
+        val zeroSecret = prefs.getBoolean(BG_PREF_ZERO_SECRET, false)
+        prefs.edit().clear().putBoolean(BG_PREF_ZERO_SECRET, zeroSecret).commit()
         try {
             val ks = KeyStore.getInstance(BG_KEYSTORE).also { it.load(null) }
             if (ks.containsAlias(BG_KEYSTORE_ALIAS)) ks.deleteEntry(BG_KEYSTORE_ALIAS)

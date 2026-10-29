@@ -23,6 +23,7 @@ object NotificationHelper {
         context: Context,
         callIdHex: String,
         peerDisplay: String,
+        peerIdB64: String,
         hasVideo: Boolean,
         showContent: Boolean,
     ) {
@@ -30,7 +31,7 @@ object NotificationHelper {
             val callIntent = Intent(context, com.ada.messenger.MainActivity::class.java).apply {
                 putExtra(com.ada.messenger.MainActivity.EXTRA_OPEN_CALL, true)
                 putExtra(com.ada.messenger.MainActivity.EXTRA_CALL_ID, callIdHex)
-                putExtra(com.ada.messenger.MainActivity.EXTRA_CALL_PEER, peerDisplay)
+                putExtra(com.ada.messenger.MainActivity.EXTRA_CALL_PEER, peerIdB64)
                 putExtra(com.ada.messenger.MainActivity.EXTRA_CALL_VIDEO, hasVideo)
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
@@ -38,6 +39,32 @@ object NotificationHelper {
                 context, AdaConfig.NOTIF_ID_CALL, callIntent,
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
+
+            // Direct decline action button
+            val declineIntent = Intent(context, com.ada.messenger.service.CallActionReceiver::class.java).apply {
+                action = com.ada.messenger.service.CallActionReceiver.ACTION_DECLINE_CALL
+                putExtra(com.ada.messenger.service.CallActionReceiver.EXTRA_CALL_ID, callIdHex)
+                putExtra(com.ada.messenger.service.CallActionReceiver.EXTRA_PEER_ID, peerIdB64)
+            }
+            val declinePi = PendingIntent.getBroadcast(
+                context, AdaConfig.NOTIF_ID_CALL + 1, declineIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+
+            // Direct answer action button
+            val answerIntent = Intent(context, com.ada.messenger.MainActivity::class.java).apply {
+                putExtra(com.ada.messenger.MainActivity.EXTRA_OPEN_CALL, true)
+                putExtra(com.ada.messenger.MainActivity.EXTRA_ANSWER_NOW, true)
+                putExtra(com.ada.messenger.MainActivity.EXTRA_CALL_ID, callIdHex)
+                putExtra(com.ada.messenger.MainActivity.EXTRA_CALL_PEER, peerIdB64)
+                putExtra(com.ada.messenger.MainActivity.EXTRA_CALL_VIDEO, hasVideo)
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val answerPi = PendingIntent.getActivity(
+                context, AdaConfig.NOTIF_ID_CALL + 2, answerIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+
             val title = if (hasVideo) context.getString(R.string.notification_incoming_video_call) else context.getString(R.string.notification_incoming_audio_call)
             val ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
             val notif = NotificationCompat.Builder(context, AdaConfig.CHANNEL_CALL_ID)
@@ -50,6 +77,16 @@ object NotificationHelper {
                 .setFullScreenIntent(pi, true)
                 .setVibrate(longArrayOf(0, 500, 250, 500, 250, 500))
                 .setSound(ringtoneUri)
+                .addAction(
+                    R.drawable.ic_notification,
+                    context.getString(R.string.call_action_decline),
+                    declinePi
+                )
+                .addAction(
+                    R.drawable.ic_notification,
+                    context.getString(R.string.call_action_answer),
+                    answerPi
+                )
                 .setVisibility(
                     if (showContent) NotificationCompat.VISIBILITY_PUBLIC
                     else NotificationCompat.VISIBILITY_PRIVATE

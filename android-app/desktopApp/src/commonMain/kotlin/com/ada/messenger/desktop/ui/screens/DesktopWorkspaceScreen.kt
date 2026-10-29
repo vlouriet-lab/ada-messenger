@@ -1033,12 +1033,18 @@ private fun MessagePane(
                     IconButton(onClick = { renameDialogOpen = true }) {
                         Icon(Icons.Default.Edit, contentDescription = "Переименовать", modifier = Modifier.size(18.dp))
                     }
-                    IconButton(onClick = onStartAudioCall, enabled = !callBusy) {
-                        Icon(Icons.Default.Call, contentDescription = "Голосовой звонок")
-                    }
-                    IconButton(onClick = onStartVideoCall, enabled = !callBusy) {
-                        Icon(Icons.Default.Videocam, contentDescription = "Видеозвонок")
-                    }
+                }
+                IconButton(onClick = onStartAudioCall, enabled = !callBusy) {
+                    Icon(
+                        Icons.Default.Call,
+                        contentDescription = if (conversation.isGroup) "Групповой звонок" else "Голосовой звонок",
+                    )
+                }
+                IconButton(onClick = onStartVideoCall, enabled = !callBusy) {
+                    Icon(
+                        Icons.Default.Videocam,
+                        contentDescription = if (conversation.isGroup) "Групповой видеозвонок" else "Видеозвонок",
+                    )
                 }
             }
         }

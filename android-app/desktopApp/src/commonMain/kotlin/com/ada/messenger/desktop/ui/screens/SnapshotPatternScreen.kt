@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.ada.messenger.desktop.ui.components.PATTERN_CUBES
 import com.ada.messenger.desktop.ui.components.PatternBoardView
 import com.ada.messenger.desktop.ui.components.applyCellAction
 import com.ada.messenger.desktop.ui.components.cycleCell
@@ -78,14 +79,6 @@ fun SnapshotPatternScreen(
         }
     }
 
-    fun buildCells(pattern: Map<Int, Int>): ByteArray {
-        val buf = ByteArray(32)
-        pattern.entries.forEachIndexed { i, (idx, color) ->
-            buf[i * 2] = idx.toByte()
-            buf[i * 2 + 1] = color.toByte()
-        }
-        return buf
-    }
 
     Column(
         modifier = Modifier
@@ -146,8 +139,8 @@ fun SnapshotPatternScreen(
                         Spacer(Modifier.height(16.dp))
                         Button(
                             onClick = {
-                                if (firstPattern.size < 4) {
-                                    localError = "Нужно выбрать не менее 4 кубиков"
+                                if (firstPattern.size != PATTERN_CUBES) {
+                                    localError = "Нужно выбрать ровно $PATTERN_CUBES кубиков"
                                     shakeError = true
                                 } else {
                                     localError = null
@@ -189,7 +182,7 @@ fun SnapshotPatternScreen(
                                     localError = null
                                     onClearError()
                                     step = SnapshotRegStep.LOADING
-                                    onSetPattern(buildCells(firstPattern))
+                                    onSetPattern(firstPattern.toPatternBytes())
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),

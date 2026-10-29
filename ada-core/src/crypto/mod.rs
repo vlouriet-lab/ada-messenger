@@ -1,3 +1,4 @@
+pub mod dpapi;
 pub mod pin_vault;
 pub mod pq;
 pub mod prekeys;

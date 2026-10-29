@@ -838,7 +838,7 @@ impl ADACore {
         msg_db_key: Option<&[u8; 32]>,
     ) -> Result<Arc<Self>> {
         let (event_tx, event_rx) = mpsc::channel(4096);
-        let id_store = Arc::new(IdentityStore::new(kv));
+        let id_store = Arc::new(IdentityStore::new(kv.clone()));
 
         let sessions = Arc::new(SessionManager::new_with_storage(
             identity.clone(),
@@ -976,7 +976,11 @@ impl ADACore {
             ephemeral_aliases: parking_lot::RwLock::new(std::collections::HashMap::new()),
             media_proxies: parking_lot::RwLock::new(std::collections::HashMap::new()),
             active_mesh_peers: parking_lot::RwLock::new(std::collections::HashSet::new()),
-            mesh_radio_router: Arc::new(crate::network::mesh_radio::MeshRadioRouter::new(local_peer_id)),
+            mesh_radio_router: {
+                let r = Arc::new(crate::network::mesh_radio::MeshRadioRouter::new(local_peer_id));
+                r.set_persistent_store(kv);
+                r
+            },
             group_call_rooms_by_session: parking_lot::RwLock::new(std::collections::HashMap::new()),
             group_call_session_by_call: parking_lot::RwLock::new(std::collections::HashMap::new()),
             iroh: RwLock::new(None),
@@ -4464,12 +4468,24 @@ impl ADACore {
                 self.handle_group_call_signal(envelope.group_id, envelope.sender_peer_id, signal).await;
             }
             crate::network::gossip::GossipPayload::Presence { status } => {
+                let peer_id = PeerId(envelope.sender_peer_id);
                 tracing::debug!(
                     "Gossip presence for peer {} in group {}: status {}",
                     hex::encode(envelope.sender_peer_id),
                     hex::encode(envelope.group_id),
                     status
                 );
+                if status == 1 {
+                    let changed = self.online_peers.write().insert(envelope.sender_peer_id);
+                    if changed {
+                        let _ = self.event_tx.send(ADAEvent::PeerOnline(peer_id)).await;
+                    }
+                } else if status == 0 {
+                    let changed = self.online_peers.write().remove(&envelope.sender_peer_id);
+                    if changed {
+                        let _ = self.event_tx.send(ADAEvent::PeerOffline(peer_id)).await;
+                    }
+                }
             }
         }
     }
@@ -4500,9 +4516,26 @@ impl ADACore {
                     hex::encode(call_id)
                 );
             }
-            GroupCallSignal::Offer { target_peer_id, .. } => {
+            GroupCallSignal::Offer { call_id, target_peer_id, sdp } => {
                 if target_peer_id == self.identity.peer_id.0 {
                     tracing::info!("[call] Received group call offer from {}", hex::encode(sender));
+                    let (has_video, room) = self
+                        .get_group_call_room_for_call(call_id)
+                        .map(|r| (r.has_video, Some(r)))
+                        .unwrap_or((false, None));
+                    let from = PeerId(sender);
+                    self.calls_received_total
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let _ = self
+                        .event_tx
+                        .send(ADAEvent::IncomingCall {
+                            call_id,
+                            from,
+                            has_video,
+                            offer_sdp: sdp,
+                            room,
+                        })
+                        .await;
                 }
             }
             GroupCallSignal::Answer { call_id, target_peer_id, sdp } => {
@@ -4571,6 +4604,20 @@ impl ADACore {
                     hex::encode(sender),
                     hex::encode(call_id)
                 );
+                let ended_state = crate::media::call::CallState::Ended {
+                    duration_secs: 0,
+                    reason: crate::media::call::EndReason::HungUp,
+                };
+                let _ = self
+                    .event_tx
+                    .send(ADAEvent::CallStateChanged {
+                        call_id,
+                        peer: PeerId(sender),
+                        has_video: false,
+                        state: ended_state,
+                        answer_sdp: None,
+                    })
+                    .await;
             }
             GroupCallSignal::ParticipantList { .. } => {}
         }
@@ -5532,6 +5579,18 @@ impl ADACore {
         }
 
         self.register_group_call_room(group_id, session_id, has_video, participants, &[]);
+
+        if let Some(gossip) = self.gossip.read().await.as_ref() {
+            let _ = gossip
+                .broadcast(
+                    &group_id,
+                    crate::network::gossip::GossipPayload::CallSignal(
+                        crate::network::gossip::GroupCallSignal::JoinRequest { call_id: session_id },
+                    ),
+                )
+                .await;
+        }
+
         Ok(session_id)
     }
 
@@ -5604,6 +5663,16 @@ impl ADACore {
             } else {
                 self.remove_group_call_mapping(call_id);
             }
+        }
+        if let Some(gossip) = self.gossip.read().await.as_ref() {
+            let _ = gossip
+                .broadcast(
+                    &room.group_id,
+                    crate::network::gossip::GossipPayload::CallSignal(
+                        crate::network::gossip::GroupCallSignal::Leave { call_id: session_id },
+                    ),
+                )
+                .await;
         }
         self.group_call_rooms_by_session.write().remove(&session_id);
         Ok(())
@@ -6478,6 +6547,7 @@ impl ADACore {
                         self.mesh_radio_router.local_short_id(),
                         sender_short_id,
                         msg_id,
+                        4,
                     );
                     Some(ack.encode().to_vec())
                 } else {
@@ -6509,6 +6579,19 @@ impl ADACore {
                 Ok(None)
             }
             MeshProcessResult::FragmentBuffered { .. } => Ok(None),
+            MeshProcessResult::Forward { forward_frame, recipient_short_id, ttl, jitter_ms } => {
+                tracing::debug!(
+                    "mesh_radio: forwarding multi-hop packet to short_id 0x{:08X} (ttl={}, jitter={}ms)",
+                    recipient_short_id,
+                    ttl,
+                    jitter_ms
+                );
+                Ok(Some(forward_frame.to_vec()))
+            }
+            MeshProcessResult::DuplicateSuppressed => {
+                tracing::trace!("mesh_radio: suppressed duplicate packet");
+                Ok(None)
+            }
             MeshProcessResult::Ignored => Ok(None),
         }
     }
@@ -6550,6 +6633,7 @@ impl ADACore {
             msg_id,
             Bytes::copy_from_slice(wire_bytes),
             mtu,
+            4,
         ).map_err(|e| ADAError::Network(format!("mesh_radio fragment error: {}", e)))?;
 
         let encoded = frames.into_iter().map(|f| f.encode().to_vec()).collect();

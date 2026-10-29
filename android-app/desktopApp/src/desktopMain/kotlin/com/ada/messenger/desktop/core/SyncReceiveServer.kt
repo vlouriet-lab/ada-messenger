@@ -1,7 +1,8 @@
 package com.ada.messenger.desktop.core
 
-import java.io.BufferedReader
-import java.io.InputStreamReader
+import java.io.BufferedInputStream
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.net.InetAddress
 import java.net.NetworkInterface
 import java.net.ServerSocket
@@ -55,6 +56,27 @@ class SyncReceiveServer(
         private const val MAX_AUTH_NONCES = 512
         /** Maximum concurrent in-flight handler threads. */
         private const val MAX_CONNECTIONS = 4
+        private val VIRTUAL_ADAPTER_REGEX = Regex("(?i)vethernet|virtualbox|vmware|docker|vbox|tailscale|zerotier|wsl")
+
+        /** Read an ASCII line from an InputStream byte-by-byte up to \r\n or \n. */
+        fun readAsciiLine(input: InputStream): String? {
+            val out = ByteArrayOutputStream()
+            while (true) {
+                val b = input.read()
+                if (b == -1) {
+                    return if (out.size() == 0) null else out.toString(Charsets.US_ASCII.name())
+                }
+                if (b == '\n'.code) {
+                    val bytes = out.toByteArray()
+                    val len = if (bytes.isNotEmpty() && bytes.last() == '\r'.code.toByte()) bytes.size - 1 else bytes.size
+                    return String(bytes, 0, len, Charsets.US_ASCII)
+                }
+                out.write(b)
+                if (out.size() > 8192) {
+                    throw java.io.IOException("HTTP header line exceeded maximum length (8KB)")
+                }
+            }
+        }
     }
 
     private val seenAuthNonces = ArrayDeque<String>()
@@ -64,14 +86,20 @@ class SyncReceiveServer(
     var port: Int = 0
         private set
 
+    /** The local IP the server is bound to. Valid after [start] returns. */
+    var host: String = "127.0.0.1"
+        private set
+
     /**
      * Bind to a random port and start accepting connections in a background
      * daemon thread.  Safe to call only once.
      */
     fun start() {
-        val ss = ServerSocket(0, 50, getLocalBindAddress())
+        val addr = getLocalBindAddress()
+        val ss = ServerSocket(0, 50, addr)
         serverSocket = ss
         port = ss.localPort
+        host = addr.hostAddress ?: "127.0.0.1"
 
         val t = Thread({ acceptLoop(ss) }, "sync-receive-server")
         t.isDaemon = true
@@ -125,10 +153,10 @@ class SyncReceiveServer(
                     return
                 }
 
-                val reader = BufferedReader(InputStreamReader(sock.getInputStream(), Charsets.UTF_8))
+                val input = BufferedInputStream(sock.getInputStream())
 
                 // Request line — expect "POST /sync HTTP/1.x"
-                val requestLine = reader.readLine() ?: return
+                val requestLine = readAsciiLine(input) ?: return
                 val requestParts = requestLine.split(" ")
                 val method = requestParts.getOrNull(0) ?: ""
                 val path   = requestParts.getOrNull(1) ?: ""
@@ -147,7 +175,7 @@ class SyncReceiveServer(
                 var authNonce: String? = null
                 var authMac: String? = null
                 while (true) {
-                    val line = reader.readLine() ?: break
+                    val line = readAsciiLine(input) ?: break
                     if (line.isEmpty()) break
                     val colonIdx = line.indexOf(':')
                     if (colonIdx > 0) {
@@ -168,15 +196,19 @@ class SyncReceiveServer(
                     return
                 }
 
-                // Read body (base64-encoded sealed payload)
-                val bodyChars = CharArray(contentLength)
+                // Read body by exact byte count (prevents UTF-8 multibyte char truncations/hangs)
+                val bodyBytes = ByteArray(contentLength)
                 var totalRead = 0
                 while (totalRead < contentLength) {
-                    val n = reader.read(bodyChars, totalRead, contentLength - totalRead)
+                    val n = input.read(bodyBytes, totalRead, contentLength - totalRead)
                     if (n == -1) break
                     totalRead += n
                 }
-                val dataB64 = String(bodyChars, 0, totalRead).trim()
+                if (totalRead != contentLength) {
+                    writeResponse(sock, 400, "Bad Request")
+                    return
+                }
+                val dataB64 = String(bodyBytes, Charsets.UTF_8).trim()
 
                 if (dataB64.isEmpty()) {
                     writeResponse(sock, 400, "Bad Request")
@@ -277,15 +309,32 @@ class SyncReceiveServer(
 
     private fun getLocalBindAddress(): InetAddress {
         try {
-            val interfaces = NetworkInterface.getNetworkInterfaces() ?: return InetAddress.getByName("127.0.0.1")
-            for (iface in interfaces.asSequence()) {
+            val interfaces = NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
+            val candidateAddrs = mutableListOf<InetAddress>()
+            val fallbackAddrs = mutableListOf<InetAddress>()
+
+            for (iface in interfaces) {
                 if (!iface.isUp || iface.isLoopback || iface.isVirtual) continue
+                val isVirtualName = VIRTUAL_ADAPTER_REGEX.containsMatchIn(iface.name) ||
+                        VIRTUAL_ADAPTER_REGEX.containsMatchIn(iface.displayName)
+
                 for (addr in iface.inetAddresses.asSequence()) {
-                    if (addr.isLoopbackAddress) continue
-                    if (addr is java.net.Inet4Address && addr.isSiteLocalAddress) {
-                        return addr
+                    if (addr.isLoopbackAddress || addr !is java.net.Inet4Address || !addr.isSiteLocalAddress) continue
+                    val host = addr.hostAddress ?: continue
+                    if (host.startsWith("192.168.56.")) continue
+
+                    if (isVirtualName) {
+                        fallbackAddrs.add(addr)
+                    } else {
+                        candidateAddrs.add(addr)
                     }
                 }
+            }
+            if (candidateAddrs.isNotEmpty()) {
+                return candidateAddrs.first()
+            }
+            if (fallbackAddrs.isNotEmpty()) {
+                return fallbackAddrs.first()
             }
         } catch (_: Exception) {
         }

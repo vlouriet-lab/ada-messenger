@@ -3,8 +3,12 @@ package com.ada.messenger.core
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.net.HttpURLConnection
+import java.io.BufferedInputStream
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.net.URL
 
 /**
@@ -17,7 +21,8 @@ import java.net.URL
  *     only the encrypted payload.
  *   - Server validates the token, decrypts the payload, then completes the login.
  *
- * No additional dependencies required — uses [java.net.HttpURLConnection] (always available).
+ * Direct Socket transport is used so that local Wi-Fi pairing works safely even when
+ * the application disables cleartext HTTP globally via Android Network Security Config.
  */
 class WifiDesktopLinkManager {
 
@@ -55,36 +60,31 @@ class WifiDesktopLinkManager {
 
         Log.i(TAG, "Connecting to PC at ${redactedServer(serverUrl)}")
 
-        var conn: HttpURLConnection? = null
         return@withContext try {
-            conn = (URL(serverUrl).openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                setRequestProperty("Accept", "application/json")
-                connectTimeout = CONNECT_TIMEOUT_MS
-                readTimeout = READ_TIMEOUT_MS
-                doOutput = true
-            }
+            val parsedUrl = URL(serverUrl)
+            val host = parsedUrl.host
+            val port = if (parsedUrl.port > 0) parsedUrl.port else 80
+            val path = parsedUrl.file.ifEmpty { "/link" }
 
             val encryptedBody = WifiLinkCrypto.encryptSnapshotForServer(serverUrl, identityJson)
             val bodyBytes = encryptedBody.toByteArray(Charsets.UTF_8)
-            conn.outputStream.use { it.write(bodyBytes) }
 
-            val httpCode = conn.responseCode
+            val (httpCode, responseBody) = postHttpOverSocket(
+                host = host,
+                port = port,
+                path = path,
+                contentType = "application/json; charset=utf-8",
+                bodyBytes = bodyBytes,
+                connectTimeoutMs = CONNECT_TIMEOUT_MS,
+                readTimeoutMs = READ_TIMEOUT_MS,
+            )
             Log.i(TAG, "Server responded: HTTP $httpCode")
 
             if (httpCode in 200..299) {
-                // Read response body to extract sync_port from {"ok":true,"sync_port":N}
-                val responseBody = runCatching {
-                    conn.inputStream?.bufferedReader()?.readText()
-                }.getOrNull() ?: ""
                 val syncPort = parseSyncPort(responseBody)
                 WifiLinkResult.Success(syncPort)
             } else {
-                val body = runCatching {
-                    conn.errorStream?.bufferedReader()?.readText()?.take(256)
-                }.getOrNull() ?: ""
-                WifiLinkResult.Failure("Сервер вернул код $httpCode. $body".trim())
+                WifiLinkResult.Failure("Сервер вернул код $httpCode. ${responseBody.take(256)}".trim())
             }
         } catch (e: Exception) {
             Log.e(TAG, "sendIdentityToPC failed", e)
@@ -96,8 +96,79 @@ class WifiDesktopLinkManager {
                 else -> e.localizedMessage ?: "Ошибка соединения"
             }
             WifiLinkResult.Failure(msg)
-        } finally {
-            conn?.disconnect()
+        }
+    }
+
+    private fun postHttpOverSocket(
+        host: String,
+        port: Int,
+        path: String,
+        contentType: String,
+        bodyBytes: ByteArray,
+        connectTimeoutMs: Int,
+        readTimeoutMs: Int,
+    ): Pair<Int, String> {
+        Socket().use { sock ->
+            sock.connect(InetSocketAddress(host, port), connectTimeoutMs)
+            sock.soTimeout = readTimeoutMs
+            val out = sock.getOutputStream()
+            val reqHeaders = buildString {
+                append("POST $path HTTP/1.1\r\n")
+                append("Host: $host:$port\r\n")
+                append("Content-Type: $contentType\r\n")
+                append("Content-Length: ${bodyBytes.size}\r\n")
+                append("Connection: close\r\n")
+                append("\r\n")
+            }
+            out.write(reqHeaders.toByteArray(Charsets.US_ASCII))
+            out.write(bodyBytes)
+            out.flush()
+
+            val input = BufferedInputStream(sock.getInputStream())
+            val statusLine = readAsciiLine(input) ?: return 500 to ""
+            val parts = statusLine.split(" ")
+            val code = parts.getOrNull(1)?.toIntOrNull() ?: 500
+
+            var contentLength = -1
+            while (true) {
+                val line = readAsciiLine(input) ?: break
+                if (line.isEmpty()) break
+                val colon = line.indexOf(':')
+                if (colon > 0 && line.substring(0, colon).trim().equals("content-length", ignoreCase = true)) {
+                    contentLength = line.substring(colon + 1).trim().toIntOrNull() ?: -1
+                }
+            }
+
+            val body = if (contentLength >= 0) {
+                val buf = ByteArray(contentLength)
+                var read = 0
+                while (read < contentLength) {
+                    val n = input.read(buf, read, contentLength - read)
+                    if (n == -1) break
+                    read += n
+                }
+                String(buf, 0, read, Charsets.UTF_8)
+            } else {
+                input.bufferedReader(Charsets.UTF_8).readText()
+            }
+            return code to body
+        }
+    }
+
+    private fun readAsciiLine(input: InputStream): String? {
+        val out = ByteArrayOutputStream()
+        while (true) {
+            val b = input.read()
+            if (b == -1) {
+                return if (out.size() == 0) null else out.toString(Charsets.US_ASCII.name())
+            }
+            if (b == '\n'.code) {
+                val bytes = out.toByteArray()
+                val len = if (bytes.isNotEmpty() && bytes.last() == '\r'.code.toByte()) bytes.size - 1 else bytes.size
+                return String(bytes, 0, len, Charsets.US_ASCII)
+            }
+            out.write(b)
+            if (out.size() > 8192) throw java.io.IOException("Line too long")
         }
     }
 

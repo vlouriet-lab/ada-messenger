@@ -13,7 +13,7 @@ use crate::identity::PeerId;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use zeroize::ZeroizeOnDrop;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 #[allow(dead_code)]
 const SENDER_KEY_INFO: &[u8] = b"ADA-SenderKey-v1";
@@ -143,15 +143,21 @@ pub struct SenderKeySession {
     received_keys: HashMap<PeerId, SenderKeyState>,
 }
 
-#[derive(ZeroizeOnDrop)]
 struct SenderKeyState {
     chain_key: [u8; 32],
     iteration: u32,
-    #[zeroize(skip)]
     signing_public: [u8; 32],
     /// Buffered future message keys
-    #[zeroize(skip)]
     buffered: HashMap<u32, [u8; 32]>,
+}
+
+impl Drop for SenderKeyState {
+    fn drop(&mut self) {
+        self.chain_key.zeroize();
+        for (_, mut key) in self.buffered.drain() {
+            key.zeroize();
+        }
+    }
 }
 
 impl SenderKeySession {
@@ -201,16 +207,25 @@ impl SenderKeySession {
 
     /// Decrypt a message from another group member
     pub fn decrypt(&mut self, msg: &SenderKeyMessage, aad: &[u8]) -> Result<Vec<u8>> {
-        msg.verify()?;
-
         let state = self
             .received_keys
             .get_mut(&msg.sender)
             .ok_or(ADAError::Crypto("No sender key for this peer".into()))?;
 
+        // Enforce that message's signing public key matches the installed public key for this sender
+        if msg.signing_public != state.signing_public {
+            return Err(ADAError::Crypto(
+                "Sender key signing public mismatch: untrusted signing key".into(),
+            ));
+        }
+
+        msg.verify()?;
+
         // Check if we have a buffered key for this iteration
-        if let Some(mk) = state.buffered.remove(&msg.iteration) {
-            return decrypt(&mk, &msg.ciphertext, Some(aad));
+        if let Some(mk) = state.buffered.get(&msg.iteration) {
+            let plaintext = decrypt(mk, &msg.ciphertext, Some(aad))?;
+            state.buffered.remove(&msg.iteration);
+            return Ok(plaintext);
         }
 
         // Advance chain to reach the needed iteration
@@ -223,22 +238,32 @@ impl SenderKeySession {
             return Err(ADAError::Crypto("Too many skipped group messages".into()));
         }
 
-        // Advance and buffer intermediate keys
-        while state.iteration < msg.iteration {
-            let mk = hkdf_derive_32(&state.chain_key, None, b"ada-sender-msg");
-            let new_ck = hkdf_derive_32(&state.chain_key, None, b"ada-sender-chain");
-            state.buffered.insert(state.iteration, mk);
-            state.chain_key = new_ck;
-            state.iteration += 1;
+        // Advance and buffer intermediate keys without mutating state yet
+        let mut temp_buffered = HashMap::new();
+        let mut cur_ck = state.chain_key;
+        let mut cur_iter = state.iteration;
+
+        while cur_iter < msg.iteration {
+            let mk = hkdf_derive_32(&cur_ck, None, b"ada-sender-msg");
+            let new_ck = hkdf_derive_32(&cur_ck, None, b"ada-sender-chain");
+            temp_buffered.insert(cur_iter, mk);
+            cur_ck = new_ck;
+            cur_iter += 1;
         }
 
-        // Now at the right iteration
-        let mk = hkdf_derive_32(&state.chain_key, None, b"ada-sender-msg");
-        let new_ck = hkdf_derive_32(&state.chain_key, None, b"ada-sender-chain");
-        state.chain_key = new_ck;
-        state.iteration += 1;
+        // Target iteration: derive message key and next chain key
+        let mk = hkdf_derive_32(&cur_ck, None, b"ada-sender-msg");
+        let next_ck = hkdf_derive_32(&cur_ck, None, b"ada-sender-chain");
 
-        decrypt(&mk, &msg.ciphertext, Some(aad))
+        // Attempt decryption FIRST before committing state mutations
+        let plaintext = decrypt(&mk, &msg.ciphertext, Some(aad))?;
+
+        // Decryption succeeded: atomically advance state and store buffered skipped keys
+        state.chain_key = next_ck;
+        state.iteration = cur_iter + 1;
+        state.buffered.extend(temp_buffered);
+
+        Ok(plaintext)
     }
 
     /// Get our current sender key distribution (for new members)
@@ -293,5 +318,75 @@ mod tests {
         // Bob decrypts it
         let decrypted = bob_session.decrypt(&msg, aad).unwrap();
         assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_sender_key_impersonation_prevented() {
+        use ed25519_dalek::{Signer, SigningKey};
+
+        let alice_id = Identity::generate("Alice");
+        let _bob_id = Identity::generate("Bob");
+        let group_id = [2u8; 16];
+
+        let mut alice_session = SenderKeySession::new(group_id);
+        let mut bob_session = SenderKeySession::new(group_id);
+
+        let alice_dist = alice_session.init_sender_key(alice_id.peer_id.clone());
+        bob_session.install_sender_key(alice_dist);
+
+        // Alice produces a valid message
+        let plaintext = b"Genuine message from Alice";
+        let aad = b"group-aad";
+        let mut forged_msg = alice_session.encrypt(plaintext, aad).unwrap();
+
+        // Mallory generates her own Ed25519 key and tries to sign on behalf of Alice
+        let mallory_sk = SigningKey::generate(&mut OsRng);
+        let mallory_pk = mallory_sk.verifying_key().to_bytes();
+
+        let mut to_sign = forged_msg.iteration.to_le_bytes().to_vec();
+        to_sign.extend_from_slice(&forged_msg.ciphertext.nonce);
+        to_sign.extend_from_slice(&forged_msg.ciphertext.ciphertext);
+        let mallory_sig = mallory_sk.sign(&to_sign).to_bytes().to_vec();
+
+        forged_msg.signing_public = mallory_pk;
+        forged_msg.signature = mallory_sig;
+
+        // Bob must reject the message because signing_public doesn't match Alice's installed key
+        let res = bob_session.decrypt(&forged_msg, aad);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_sender_key_corruption_preserves_state() {
+        let alice_id = Identity::generate("Alice");
+        let _bob_id = Identity::generate("Bob");
+        let group_id = [3u8; 16];
+
+        let mut alice_session = SenderKeySession::new(group_id);
+        let mut bob_session = SenderKeySession::new(group_id);
+
+        let alice_dist = alice_session.init_sender_key(alice_id.peer_id.clone());
+        bob_session.install_sender_key(alice_dist);
+
+        // Alice sends message 0
+        let msg0 = alice_session.encrypt(b"Message 0", b"aad").unwrap();
+
+        // Alice sends message 1
+        let msg1 = alice_session.encrypt(b"Message 1", b"aad").unwrap();
+
+        // Tamper with msg0 ciphertext tag so AEAD fails
+        let mut corrupted_msg0 = msg0.clone();
+        if let Some(byte) = corrupted_msg0.ciphertext.ciphertext.first_mut() {
+            *byte ^= 0xFF;
+        }
+        // Re-sign with Alice's key is not even needed if signature fails first,
+        // but let's test what happens if decrypt fails
+        let res0 = bob_session.decrypt(&corrupted_msg0, b"aad");
+        assert!(res0.is_err());
+
+        // Now Bob receives valid msg1 (lookahead skip)
+        let res1 = bob_session.decrypt(&msg1, b"aad");
+        assert!(res1.is_ok());
+        assert_eq!(res1.unwrap(), b"Message 1");
     }
 }

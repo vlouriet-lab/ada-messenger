@@ -50,7 +50,7 @@ $root       = $PSScriptRoot
 $androidDir = Join-Path $root "android-app"
 $adaCoreDir = Join-Path $root "ada-core"
 $gradlew    = Join-Path $androidDir "gradlew.bat"
-$dllSrc     = Join-Path $adaCoreDir "target\debug\ada_core.dll"
+$dllSrc     = Join-Path $adaCoreDir "target\release\ada_core.dll"
 $distRoot   = Join-Path $androidDir "desktopApp\build\compose\binaries\main\app"
 $distDir    = Join-Path $distRoot   "ADA Messenger"
 $nsisScript = Join-Path $root       "installer.nsi"
@@ -126,15 +126,16 @@ Write-Host "NSIS : $NsisPath"
 Write-Host ""
 
 # - Step 1: Build ada_core.dll -
-Write-Host "[1/4] Building ada_core.dll (Rust, mobile-dev)..." -ForegroundColor Green
+Write-Host "[1/4] Building ada_core.dll (Rust, release with sqlcipher)..." -ForegroundColor Green
 if ($SkipCargoBuild -and (Test-Path $dllSrc)) {
     Write-Host "      Skipping — reusing existing DLL" -ForegroundColor DarkGray
     Write-Host "      $dllSrc"
 } else {
     & cargo build `
         --manifest-path "$adaCoreDir\Cargo.toml" `
+        --release `
         --no-default-features `
-        --features mobile-dev `
+        --features mobile `
         --message-format short
     if ($LASTEXITCODE -ne 0) { Write-Error "Cargo build failed (exit $LASTEXITCODE)"; exit 1 }
     Write-Host "      OK: $dllSrc" -ForegroundColor Green
@@ -151,8 +152,8 @@ if ($SkipGradleBuild -and (Test-Path $launcherExe)) {
     & $gradlew `
         -p $androidDir `
         ":desktopApp:createDistributable" `
-        "-PadaCoreFeatures=mobile-dev" `
-        "-PadaCoreAllowDevStorage=true" `
+        "-PadaCoreFeatures=mobile" `
+        "-PadaCoreProfile=release" `
         "--console=plain" `
         "--no-daemon"
     if ($LASTEXITCODE -ne 0) { Write-Error "Gradle createDistributable failed"; exit 1 }

@@ -26,7 +26,7 @@ SetCompressor /SOLID lzma
 
 ; Paths relative to the repo root (where makensis is invoked).
 !define DISTDIR   "android-app\desktopApp\build\compose\binaries\main\app\ADA Messenger"
-!define DLLPATH   "ada-core\target\debug\ada_core.dll"
+!define DLLPATH   "ada-core\target\release\ada_core.dll"
 !define ICONFILE  "android-app\desktopApp\src\desktopMain\resources\ada_icon.ico"
 !define OUTDIR    "releases"
 

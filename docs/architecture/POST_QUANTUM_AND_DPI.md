@@ -24,7 +24,7 @@
   - Общий секрет ($SS$): **32 байта**
 
 ### 2.2 Детерминированная деривация из графического ключа
-В [ada-core/src/identity.rs](file:///d:/QUADA/ada-core/src/identity.rs):
+В [ada-core/src/identity.rs](../../ada-core/src/identity.rs):
 ```text
 Pattern Auth (16 ячеек x 5 цветов, 85.9 бит энтропии)
   ↓ Argon2id (64 MiB, t=3, p=1)
@@ -36,7 +36,7 @@ master_seed (32 байта)
 ```
 
 ### 2.3 PQXDH (Post-Quantum Extended Triple Diffie-Hellman)
-В [ada-core/src/crypto/x3dh.rs](file:///d:/QUADA/ada-core/src/crypto/x3dh.rs):
+В [ada-core/src/crypto/x3dh.rs](../../ada-core/src/crypto/x3dh.rs):
 - `PreKeyBundle` расширен полями:
   - `pq_spk_public: Option<Vec<u8>>` (ML-KEM-768 EK)
   - `pq_spk_signature: Option<Vec<u8>>` (Ed25519 подпись над публичным ключом KEM)
@@ -46,7 +46,7 @@ master_seed (32 байта)
 - Полученный 32-байтный результат инициализирует Double Ratchet.
 
 ### 2.4 Гибридный Double Ratchet (SPQR)
-В [ada-core/src/crypto/ratchet.rs](file:///d:/QUADA/ada-core/src/crypto/ratchet.rs):
+В [ada-core/src/crypto/ratchet.rs](../../ada-core/src/crypto/ratchet.rs):
 - При каждом асимметричном шаге (смене направления диалога):
   - Генерируется новая пара ML-KEM-768.
   - Следующее поколение корневого ключа обновляется с подмешиванием как классического X25519 DH, так и декапсулированного секрета ML-KEM:
@@ -81,7 +81,7 @@ master_seed (32 байта)
 
 ### 3.1 1-й эшелон: Полиморфный `DpiMorpher` (P2P и реле)
 
-В [ada-core/src/network/dpi.rs](file:///d:/QUADA/ada-core/src/network/dpi.rs):
+В [ada-core/src/network/dpi.rs](../../ada-core/src/network/dpi.rs):
 
 1. **Мимикрия под TLS 1.3 Record Layer:**
    Каждый кадр оборачивается в формат записи TLS 1.3 Application Data:
@@ -109,7 +109,7 @@ master_seed (32 байта)
 
 ### 3.2 2-й эшелон: Cloudflare Worker Bridge (Полноценный TLS 1.3)
 
-В [cf-workers/serverless-bridge-worker/index.js](file:///d:/QUADA/cf-workers/serverless-bridge-worker/index.js):
+В [cf-workers/serverless-bridge-worker/index.js](../../cf-workers/serverless-bridge-worker/index.js):
 
 * Если интернет-провайдер или национальный фаервол (ТСПУ) начинает блокировать любой неизвестный UDP/QUIC-трафик, мессенджер задействует **Cloudflare Serverless Bridge**.
 * **Настоящие доверенные сертификаты:** Соединение устанавливается с пограничным узлом Cloudflare CDN по протоколу **WebSocket over TLS (`wss://`)** через стандартный порт **443**.
@@ -134,7 +134,7 @@ master_seed (32 байта)
 
 ## 4. Графическая аутентификация: 5 цветов и палитра
 
-В [ada-core/src/pattern_auth.rs](file:///d:/QUADA/ada-core/src/pattern_auth.rs), [PatternBoardView.kt (Android)](file:///d:/QUADA/android-app/app/src/main/java/com/ada/messenger/ui/components/PatternBoardView.kt), [PatternBoardView.kt (Desktop)](file:///d:/QUADA/android-app/desktopApp/src/commonMain/kotlin/com/ada/messenger/desktop/ui/components/PatternBoardView.kt):
+В [ada-core/src/pattern_auth.rs](../../ada-core/src/pattern_auth.rs), [PatternBoardView.kt (Android)](../../android-app/app/src/main/java/com/ada/messenger/ui/components/PatternBoardView.kt), [PatternBoardView.kt (Desktop)](../../android-app/desktopApp/src/commonMain/kotlin/com/ada/messenger/desktop/ui/components/PatternBoardView.kt):
 
 - Число цветов увеличено с 3 до **5** (`PATTERN_COLORS = 5`).
 - **Сравнение энтропии**:

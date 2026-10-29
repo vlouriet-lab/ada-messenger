@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <!-- App-private files directory (where TransferManager stores received files) -->
-    <files-path name="ada_transfers" path="." />
-    <!-- App-private cache directory (for temp files) -->
-    <cache-path name="ada_cache" path="." />
+    <!-- Scoped shareable directories only (protects databases, salts, and root filesDir) -->
+    <files-path name="shared_media" path="shared_media/" />
+    <cache-path name="shared_cache" path="tmp_attachments/" />
+    <cache-path name="attachments_cache" path="attachments/" />
 </paths>

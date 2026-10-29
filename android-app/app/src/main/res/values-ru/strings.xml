@@ -17,6 +17,7 @@
     <string name="notification_default_message">Новое сообщение</string>
     <string name="notification_incoming_video_call">Входящий видеозвонок</string>
     <string name="notification_incoming_audio_call">Входящий звонок</string>
+    <string name="call_action_decline">Отклонить</string>
     <string name="notification_channel_messages">Сообщения</string>
     <string name="notification_channel_messages_desc">Уведомления о новых сообщениях</string>
     <string name="notification_channel_calls">Входящие звонки</string>

@@ -136,6 +136,31 @@ class WebRTCBridge(
     private var savedSpeakerphoneOn = false
     private var audioFocusRequest: AudioFocusRequest? = null
 
+    // Dynamically re-route audio when Bluetooth / wired headset is plugged or unplugged
+    private val audioDeviceCallback: android.media.AudioDeviceCallback? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            object : android.media.AudioDeviceCallback() {
+                override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
+                    Log.d(TAG, "Audio devices added: ${addedDevices?.map { it.type }}")
+                    val hasHeadset = addedDevices?.any {
+                        it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                        it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                        it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                        it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                        it.type == AudioDeviceInfo.TYPE_USB_HEADSET
+                    } ?: false
+                    if (hasHeadset) {
+                        setSpeakerphoneOn(false)
+                    }
+                }
+
+                override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
+                    Log.d(TAG, "Audio devices removed: ${removedDevices?.map { it.type }}")
+                    setSpeakerphoneOn(hasVideo)
+                }
+            }
+        } else null
+
     // Guards against duplicate full cleanup (reset when a new top-level call starts).
     private val callEndedGuard = AtomicBoolean(false)
 
@@ -239,6 +264,7 @@ class WebRTCBridge(
         if (attachLocalTracks) {
             attachLocalTracksToSession(session)
         }
+        updateAllAudioBitrates()
         return session
     }
 
@@ -295,6 +321,7 @@ class WebRTCBridge(
         remoteVideoSink?.let { sink ->
             selectedRemoteVideoTrack()?.addSink(sink)
         }
+        updateAllAudioBitrates()
         return !anyActiveSessions()
     }
 
@@ -499,6 +526,9 @@ class WebRTCBridge(
 
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
         setSpeakerphoneOn(hasVideo)  // speaker on for video, earpiece for audio
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            audioDeviceCallback?.let { audioManager.registerAudioDeviceCallback(it, null) }
+        }
         logCommunicationRoute("startAudioForCall")
 
         // Ensure voice-call stream volume is audible (may be 0 on first install)
@@ -537,6 +567,9 @@ class WebRTCBridge(
         } else {
             @Suppress("DEPRECATION")
             audioManager.abandonAudioFocus(null)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            audioDeviceCallback?.let { audioManager.unregisterAudioDeviceCallback(it) }
         }
         audioManager.mode = savedAudioMode
         setSpeakerphoneOn(savedSpeakerphoneOn)
@@ -841,6 +874,24 @@ class WebRTCBridge(
             } else {
                 session.pendingRemoteIceCandidates.add(ice)
                 Log.d(TAG, "ICE candidate buffered for ${session.peerId} (remoteDesc not set yet), total=${session.pendingRemoteIceCandidates.size}")
+            }
+        }
+    }
+
+    /**
+     * Called when the default network interface changes (e.g. Wi-Fi <-> LTE handover).
+     * Proactively triggers ICE restart on active peer connections rather than waiting
+     * for a 2-second DISCONNECTED timeout.
+     */
+    fun onNetworkChanged() {
+        if (callEndedGuard.get()) return
+        Log.i(TAG, "onNetworkChanged: evaluating active sessions for proactive ICE restart")
+        synchronized(sessionsLock) {
+            participantSessions.values.forEach { session ->
+                if (session.iceWasConnected) {
+                    Log.i(TAG, "Triggering proactive ICE restart for peer=${session.peerId.take(12)}")
+                    session.peerConnection.restartIce()
+                }
             }
         }
     }
@@ -1201,6 +1252,51 @@ class WebRTCBridge(
         localAudioTrack?.let { session.peerConnection.addTrack(it, listOf("stream0")) }
         if (session.hasVideo) {
             localVideoTrack?.let { session.peerConnection.addTrack(it, listOf("stream0")) }
+            applyVideoEncoderSettings(session.peerConnection)
+        }
+        applyAudioEncoderSettings(session.peerConnection, currentParticipantCount())
+    }
+
+    private fun currentParticipantCount(): Int = synchronized(sessionsLock) {
+        participantSessions.size.coerceAtLeast(1)
+    }
+
+    private fun updateAllAudioBitrates() {
+        val count = currentParticipantCount()
+        synchronized(sessionsLock) {
+            for (session in participantSessions.values) {
+                applyAudioEncoderSettings(session.peerConnection, count)
+            }
+        }
+    }
+
+    /**
+     * Adaptive Opus audio bitrate scaling based on active mesh participant count:
+     * - 1:1 call (<=2 participants): 32 kbps (pristine wideband voice)
+     * - Small group (3-4 participants): 24 kbps
+     * - Medium group (5-6 participants): 16 kbps (saves uplink bandwidth on N-way mesh replication)
+     */
+    private fun applyAudioEncoderSettings(pc: PeerConnection, participantCount: Int) {
+        try {
+            val senders = pc.senders
+            for (sender in senders) {
+                val track = sender.track() ?: continue
+                if (track.kind() != "audio") continue
+                val params = sender.parameters
+                val encodings = params.encodings
+                if (encodings.isNotEmpty()) {
+                    val targetBitrateBps = when {
+                        participantCount <= 2 -> 32_000
+                        participantCount <= 4 -> 24_000
+                        else -> 16_000
+                    }
+                    encodings[0].maxBitrateBps = targetBitrateBps
+                    sender.parameters = params
+                    Log.d(TAG, "Audio encoder bitrate set to $targetBitrateBps bps (participants=$participantCount)")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "applyAudioEncoderSettings: ${e.message}")
         }
     }
 

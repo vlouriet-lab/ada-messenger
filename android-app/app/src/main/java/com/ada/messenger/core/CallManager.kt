@@ -410,6 +410,14 @@ class CallManager(
         }
     }
 
+    /** Called when network connectivity changes (e.g. Wi-Fi <-> LTE handover). */
+    fun onNetworkChanged() {
+        if (_activeCall.value != null) {
+            Log.i(TAG, "onNetworkChanged during active call — notifying WebRTC")
+            webRtcProvider()?.onNetworkChanged()
+        }
+    }
+
     fun onCallStateChangedEvent(raw: org.json.JSONObject) {
         val stateStr = raw.optString("state", "")
         val state = CallState.fromString(stateStr)

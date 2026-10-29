@@ -1,7 +1,8 @@
 package com.ada.messenger.desktop.core
 
-import java.io.BufferedReader
-import java.io.InputStreamReader
+import java.io.BufferedInputStream
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.net.InetAddress
 import java.net.NetworkInterface
 import java.net.ServerSocket
@@ -105,10 +106,10 @@ class WifiLinkServer(
                     return false
                 }
 
-                val reader = BufferedReader(InputStreamReader(sock.getInputStream(), Charsets.UTF_8))
+                val input = BufferedInputStream(sock.getInputStream())
 
-                // Read request line
-                val requestLine = reader.readLine() ?: return false
+                // Read request line (ASCII)
+                val requestLine = readAsciiLine(input) ?: return false
                 // Only accept POST /link
                 if (!requestLine.startsWith("POST ")) {
                     writeResponse(sock, 405, "Method Not Allowed")
@@ -124,7 +125,7 @@ class WifiLinkServer(
                 // Read headers to find Content-Length
                 val headers = mutableMapOf<String, String>()
                 while (true) {
-                    val line = reader.readLine() ?: break
+                    val line = readAsciiLine(input) ?: break
                     if (line.isEmpty()) break
                     val colonIdx = line.indexOf(':')
                     if (colonIdx > 0) {
@@ -139,15 +140,19 @@ class WifiLinkServer(
                     return false
                 }
 
-                // Read body
-                val bodyChars = CharArray(contentLength)
+                // Read body by exact byte count (prevents UTF-8 multibyte char truncations/hangs)
+                val bodyBytes = ByteArray(contentLength)
                 var totalRead = 0
                 while (totalRead < contentLength) {
-                    val n = reader.read(bodyChars, totalRead, contentLength - totalRead)
+                    val n = input.read(bodyBytes, totalRead, contentLength - totalRead)
                     if (n == -1) break
                     totalRead += n
                 }
-                val body = String(bodyChars, 0, totalRead)
+                if (totalRead != contentLength) {
+                    writeResponse(sock, 400, "Bad Request")
+                    return false
+                }
+                val body = String(bodyBytes, Charsets.UTF_8)
 
                 if (body.isBlank()) {
                     writeResponse(sock, 400, "Bad Request")
@@ -209,8 +214,9 @@ class WifiLinkServer(
             ?.substringAfter('=')
     }
 
-    private companion object {
+    companion object {
         private const val MAX_BODY_BYTES = 5 * 1024 * 1024
+        private val VIRTUAL_ADAPTER_REGEX = Regex("(?i)vethernet|virtualbox|vmware|docker|vbox|tailscale|zerotier|wsl")
 
         fun buildToken(): String {
             val bytes = ByteArray(32).also { SecureRandom().nextBytes(it) }
@@ -220,21 +226,58 @@ class WifiLinkServer(
         fun isAllowedRemote(address: InetAddress): Boolean =
             address.isSiteLocalAddress || address.isLinkLocalAddress || address.isLoopbackAddress
 
+        /** Read an ASCII line from an InputStream byte-by-byte up to \r\n or \n. */
+        fun readAsciiLine(input: InputStream): String? {
+            val out = ByteArrayOutputStream()
+            while (true) {
+                val b = input.read()
+                if (b == -1) {
+                    return if (out.size() == 0) null else out.toString(Charsets.US_ASCII.name())
+                }
+                if (b == '\n'.code) {
+                    val bytes = out.toByteArray()
+                    val len = if (bytes.isNotEmpty() && bytes.last() == '\r'.code.toByte()) bytes.size - 1 else bytes.size
+                    return String(bytes, 0, len, Charsets.US_ASCII)
+                }
+                out.write(b)
+                if (out.size() > 8192) {
+                    throw java.io.IOException("HTTP header line exceeded maximum length (8KB)")
+                }
+            }
+        }
+
         /**
-         * Return the first site-local IPv4 address of any non-loopback interface,
-         * falling back to the loopback address if none is found.
+         * Return the first physical/non-virtual site-local IPv4 address,
+         * avoiding WSL/Hyper-V/VirtualBox host-only adapters that phones cannot reach.
          */
         fun getLocalBindAddress(): InetAddress {
             try {
-                val interfaces = NetworkInterface.getNetworkInterfaces() ?: return InetAddress.getByName("127.0.0.1")
-                for (iface in interfaces.asSequence()) {
+                val interfaces = NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
+                val candidateAddrs = mutableListOf<InetAddress>()
+                val fallbackAddrs = mutableListOf<InetAddress>()
+
+                for (iface in interfaces) {
                     if (!iface.isUp || iface.isLoopback || iface.isVirtual) continue
+                    val isVirtualName = VIRTUAL_ADAPTER_REGEX.containsMatchIn(iface.name) ||
+                            VIRTUAL_ADAPTER_REGEX.containsMatchIn(iface.displayName)
+
                     for (addr in iface.inetAddresses.asSequence()) {
-                        if (addr.isLoopbackAddress) continue
-                        if (addr is java.net.Inet4Address && addr.isSiteLocalAddress) {
-                            return addr
+                        if (addr.isLoopbackAddress || addr !is java.net.Inet4Address || !addr.isSiteLocalAddress) continue
+                        val host = addr.hostAddress ?: continue
+                        if (host.startsWith("192.168.56.")) continue
+
+                        if (isVirtualName) {
+                            fallbackAddrs.add(addr)
+                        } else {
+                            candidateAddrs.add(addr)
                         }
                     }
+                }
+                if (candidateAddrs.isNotEmpty()) {
+                    return candidateAddrs.first()
+                }
+                if (fallbackAddrs.isNotEmpty()) {
+                    return fallbackAddrs.first()
                 }
             } catch (_: Exception) {
             }

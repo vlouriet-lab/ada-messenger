@@ -50,10 +50,14 @@ signing.properties
 *.png
 *.py
 *.ps1
+!build-installer-windows.ps1
+!scripts/*.ps1
 *.txt
 *.b64
 *.jar
 *.exe
+*.bak
+*.tmp
 
 # Quasi-release output directories
 android-app/quasi-releases/

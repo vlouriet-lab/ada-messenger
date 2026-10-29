@@ -46,28 +46,28 @@
 Фокус: ликвидация багов рендеринга и восстановление нормального поведения интерактивных элементов.
 
 ### 1.1. Ликвидация дублирования плашки цитирования в личном чате
-* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt`](file:///d:/QUADA/android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt#L809-L879)
+* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt`](../../android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt#L809-L879)
 * **Проблема:** Блок `AnimatedVisibility(visible = replyToMsg != null)` продублирован дважды подряд (строки 809–843 и 844–879).
 * **Действие:**
   - Удалить дублирующий фрагмент.
   - Сохранить корректную верстку с цветовым индикатором `MaterialTheme.colorScheme.primary`, именем автора, текстом сообщения и кнопкой отмены (`Icons.Default.Close`).
 
 ### 1.2. Исправление суффикса «(изм.)» у отредактированных сообщений
-* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt`](file:///d:/QUADA/android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt#L1648-L1666)
+* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt`](../../android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt#L1648-L1666)
 * **Проблема:** В ветке `if (annotated.getStringAnnotations("URL", 0, annotated.length).isEmpty())` вызывается `Text(text = msg.text)`, где теряется пометка `(изм.)`, добавленная в `annotated`.
 * **Действие:**
   - Унифицировать отображение текста: использовать `annotated` строку с суффиксом `(изм.)` как для текста со ссылками, так и для текста без ссылок.
   - При отсутствии ссылок выводить `Text(text = annotated)` с сохранением стилизации Material 3.
 
 ### 1.3. Восстановление полноэкранного просмотра и сохранения медиа в группах
-* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt`](file:///d:/QUADA/android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt#L2940-L2978)
+* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt`](../../android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt#L2940-L2978)
 * **Проблема:** В `GroupChatScreen` параметр `onOpenImage` заглушен `{ _, _ -> }`, а `onSaveFile` пропущен в вызове `MessageBubble`.
 * **Действие:**
   - Добавить в `GroupChatScreen` состояние `openImage: OpenImagePayload?` и диалог полноэкранного просмотра картинок с жестами зума/панорамирования.
   - Подключить лаунчер `ActivityResultContracts.CreateDocument("*/*")` для сохранения файлов и пробросить `onSaveFile` в `MessageBubble`.
 
 ### 1.4. Исправление порогов жестов и локализация панели ввода
-* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/components/NewChatInputBar.kt`](file:///d:/QUADA/android-app/app/src/main/java/com/ada/messenger/ui/components/NewChatInputBar.kt#L239-L305)
+* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/components/NewChatInputBar.kt`](../../android-app/app/src/main/java/com/ada/messenger/ui/components/NewChatInputBar.kt#L239-L305)
 * **Проблема:** Пороги свайпа для отмены и фиксации замочка захардкожены в сырых пикселях (`dragX < -100f`, `dragY < -100f`), что вызывает срывы записи на экранах с высоким DPI; строка подсказки захардкожена на английском.
 * **Действие:**
   - Рассчитывать пороги свайпа в `dp`:
@@ -86,14 +86,14 @@
 Фокус: исключение тупиковых сценариев при создании мастер-ключа.
 
 ### 2.1. Добавление шага отката при ошибке подтверждения паттерна
-* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/screens/PatternRegistrationScreen.kt`](file:///d:/QUADA/android-app/app/src/main/java/com/ada/messenger/ui/screens/PatternRegistrationScreen.kt#L168-L198)
+* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/screens/PatternRegistrationScreen.kt`](../../android-app/app/src/main/java/com/ada/messenger/ui/screens/PatternRegistrationScreen.kt#L168-L198)
 * **Проблема:** На шаге `RegStep.CONFIRM` при несовпадении узора ячейки очищаются, но вернуться на шаг 1 невозможно — пользователь не может перерисовать или посмотреть забытый рисунок.
 * **Действие:**
   - Добавить вторичное действие: `secondaryActionLabel = stringResource(R.string.pattern_register_change_first)` (*«Изменить начальный узор»*).
   - При нажатии возвращать состояние в `step = RegStep.DRAW`, сохраняя первоначальный выбор ячеек для корректировки.
 
 ### 2.2. Улучшение обратной связи сетки 8×8 (PatternBoardView)
-* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/components/PatternBoardView.kt`](file:///d:/QUADA/android-app/app/src/main/java/com/ada/messenger/ui/components/PatternBoardView.kt)
+* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/components/PatternBoardView.kt`](../../android-app/app/src/main/java/com/ada/messenger/ui/components/PatternBoardView.kt)
 * **Действие:**
   - Добавить поддержку непрерывного ведения пальцем (drag-to-paint) с отсечкой повторных срабатываний в пределах одной ячейки.
   - Добавить короткую вибрацию при закрашивании ячейки.
@@ -107,9 +107,9 @@
 
 ### 3.1. JNI и ViewModel обвязка верификации контактов
 * **Файлы:**
-  - [`ada-core/src/jni.rs`](file:///d:/QUADA/ada-core/src/jni.rs)
-  - [`android-app/app/src/main/java/com/ada/messenger/core/AdaCore.kt`](file:///d:/QUADA/android-app/app/src/main/java/com/ada/messenger/core/AdaCore.kt)
-  - [`android-app/app/src/main/java/com/ada/messenger/core/AdaCoreViewModel.kt`](file:///d:/QUADA/android-app/app/src/main/java/com/ada/messenger/core/AdaCoreViewModel.kt)
+  - [`ada-core/src/jni.rs`](../../ada-core/src/jni.rs)
+  - [`android-app/app/src/main/java/com/ada/messenger/core/AdaCore.kt`](../../android-app/app/src/main/java/com/ada/messenger/core/AdaCore.kt)
+  - [`android-app/app/src/main/java/com/ada/messenger/core/AdaCoreViewModel.kt`](../../android-app/app/src/main/java/com/ada/messenger/core/AdaCoreViewModel.kt)
 * **Действие:**
   - Пробросить методы FFI: `ada_get_contact_security_json`, `ada_mark_contact_verified`, `ada_clear_contact_verified`, `ada_accept_contact_key_change`, `ada_reject_contact_key_change`.
   - Подписаться на событие `ADAEvent::ContactKeyChanged` в цикле опроса событий `pollEvents()` и транслировать его в `StateFlow<ContactKeyChangeEvent?>`.
@@ -127,15 +127,15 @@
   - Статус подписи карточки (Карточка v4 с доверенной привязкой `ik_sig` vs TOFU).
 
 ### 3.3. Баннер предупреждения об изменении ключа в чате
-* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt`](file:///d:/QUADA/android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt)
+* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt`](../../android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt)
 * **Действие:**
   - Интегрировать предупреждающую плашку цвета `errorContainer`:
     *«Внимание: открытый ключ шифрования собеседника изменился. Это может означать переустановку приложения либо попытку перехвата трафика. [Сверить ключи] [Принять] [Отклонить]»*.
 
 ### 3.4. Визуальные маркеры проверенных собеседников
 * **Файлы:**
-  - [`android-app/app/src/main/java/com/ada/messenger/ui/screens/MainScreen.kt`](file:///d:/QUADA/android-app/app/src/main/java/com/ada/messenger/ui/screens/MainScreen.kt)
-  - [`android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt`](file:///d:/QUADA/android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt)
+  - [`android-app/app/src/main/java/com/ada/messenger/ui/screens/MainScreen.kt`](../../android-app/app/src/main/java/com/ada/messenger/ui/screens/MainScreen.kt)
+  - [`android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt`](../../android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt)
 * **Действие:**
   - Отображать зеленый бейдж-щит (`Icons.Filled.VerifiedUser` или аналогичный) рядом с именем контакта в списке диалогов и в заголовке чата для подтвержденных контактов.
 
@@ -146,14 +146,14 @@
 Фокус: освобождение полезного пространства экрана и понятный язык статусов.
 
 ### 4.1. Автоматическое сворачивание плашки при идеальном соединении
-* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/components/ConnectionStatusBar.kt`](file:///d:/QUADA/android-app/app/src/main/java/com/ada/messenger/ui/components/ConnectionStatusBar.kt)
+* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/components/ConnectionStatusBar.kt`](../../android-app/app/src/main/java/com/ada/messenger/ui/components/ConnectionStatusBar.kt)
 * **Действие:**
   - При переходе в `ConnectionLevel.GREEN` запускать таймер на 3.5 секунды, после чего анимированно сворачивать плашку (`AnimatedVisibility` с `shrinkVertically() + fadeOut()`).
   - В шапке `TopAppBar` отображать компактный светодиодный индикатор (аккуратная зеленая точка 6dp), сигнализирующий о статусе сети без занятия отдельной строки.
   - При переходе в `YELLOW`, `ORANGE`, `RED` плашка немедленно раскрывается с подробным описанием ситуации.
 
 ### 4.2. Человекопонятные описания сетевых маршрутов
-* **Файл:** [`android-app/app/src/main/res/values/strings.xml`](file:///d:/QUADA/android-app/app/src/main/res/values/strings.xml) и переводы
+* **Файл:** [`android-app/app/src/main/res/values/strings.xml`](../../android-app/app/src/main/res/values/strings.xml) и переводы
 * **Действие:**
   - Обновить формулировки строк:
     - `conn_route_iroh_live`: «Прямое P2P-соединение»
@@ -169,14 +169,14 @@
 Фокус: устранение «страшных» криптографических строк для обычных пользователей.
 
 ### 5.1. Плашка неизвестного контакта в `ChatScreen.kt`
-* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt`](file:///d:/QUADA/android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt)
+* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt`](../../android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt)
 * **Действие:**
   - Если собеседник еще не сохранен в книге контактов (имя совпадает с усеченным Base64), показывать верхнюю панель:
     *«Собеседник отсутствует в контактах. [Задать имя] [Заблокировать]»*.
   - По нажатию «Задать имя» открывать диалог переименования (`setContactAlias`).
 
 ### 5.2. Генерация цветных визуальных аватаров для безымянных пиров
-* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/components/AvatarView.kt`](file:///d:/QUADA/android-app/app/src/main/java/com/ada/messenger/ui/components/AvatarView.kt)
+* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/components/AvatarView.kt`](../../android-app/app/src/main/java/com/ada/messenger/ui/components/AvatarView.kt)
 * **Действие:**
   - Для несохраненных контактов генерировать детерминированный градиент фона и уникальный двухбуквенный псевдоним (по байтам Peer ID) вместо серого силуэта со знаком вопроса.
 
@@ -187,13 +187,13 @@
 Фокус: масштабируемость отображения при нескольких собеседниках.
 
 ### 6.1. Адаптивная сетка видеозвонка (2–4 участника)
-* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/screens/CallScreen.kt`](file:///d:/QUADA/android-app/app/src/main/java/com/ada/messenger/ui/screens/CallScreen.kt#L445-L520)
+* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/screens/CallScreen.kt`](../../android-app/app/src/main/java/com/ada/messenger/ui/screens/CallScreen.kt#L445-L520)
 * **Действие:**
   - Реализовать сетку: при 2 участниках — полноэкранное видео + PiP своего окна; при 3–4 участниках — сетка 2×2 с равными долями экрана.
   - Подсветка говорящего участника зеленой рамкой (по событию VAD / уровню звука WebRTC).
 
 ### 6.2. Пояснение ограничений P2P в диалоге добавления участников
-* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt`](file:///d:/QUADA/android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt#L2420-L2435)
+* **Файл:** [`android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt`](../../android-app/app/src/main/java/com/ada/messenger/ui/screens/ChatScreen.kt#L2420-L2435)
 * **Действие:**
   - В `AddMemberDialog` добавить поясняющий тултип: *«Группы работают полностью децентрализованно без серверов (P2P Mesh). Лимит 16 участников гарантирует стабильность связи и экономит заряд батареи»*.
 
@@ -204,7 +204,7 @@
 Фокус: использование преимуществ больших мониторов и клавиатуры.
 
 ### 7.1. Трехпанельный режим на мониторах шириной от 1280dp
-* **Файл:** [`android-app/desktopApp/src/commonMain/kotlin/com/ada/messenger/desktop/ui/screens/DesktopWorkspaceScreen.kt`](file:///d:/QUADA/android-app/desktopApp/src/commonMain/kotlin/com/ada/messenger/desktop/ui/screens/DesktopWorkspaceScreen.kt#L175-L265)
+* **Файл:** [`android-app/desktopApp/src/commonMain/kotlin/com/ada/messenger/desktop/ui/screens/DesktopWorkspaceScreen.kt`](../../android-app/desktopApp/src/commonMain/kotlin/com/ada/messenger/desktop/ui/screens/DesktopWorkspaceScreen.kt#L175-L265)
 * **Действие:**
   - При ширине окна `>= 1280.dp` отображать 3 панели:
     1. Навигационный рейл + список чатов с поиском.
@@ -212,7 +212,7 @@
     3. Боковая панель с деталями: открытый ключ, числа безопасности (Safety Numbers), общие медиафайлы и список участников группы.
 
 ### 7.2. Создание групп в десктопной версии
-* **Файл:** [`android-app/desktopApp/src/commonMain/kotlin/com/ada/messenger/desktop/ui/screens/DesktopWorkspaceScreen.kt`](file:///d:/QUADA/android-app/desktopApp/src/commonMain/kotlin/com/ada/messenger/desktop/ui/screens/DesktopWorkspaceScreen.kt)
+* **Файл:** [`android-app/desktopApp/src/commonMain/kotlin/com/ada/messenger/desktop/ui/screens/DesktopWorkspaceScreen.kt`](../../android-app/desktopApp/src/commonMain/kotlin/com/ada/messenger/desktop/ui/screens/DesktopWorkspaceScreen.kt)
 * **Действие:**
   - Добавить диалог «Создать группу» в меню действий на Desktop с генерацией топика через `ADACore::create_group`.
 
@@ -227,9 +227,9 @@
 ## Фаза 8. Тестирование, валидация и регрессионный контроль
 
 - [x] **8.1. Unit-тесты компонентов Android:**
-  - Тестирование [`ConnectionStatusBarTest.kt`](file:///d:/QUADA/android-app/app/src/test/java/com/ada/messenger/ui/components/ConnectionStatusBarTest.kt) и [`AdaModelsTest.kt`](file:///d:/QUADA/android-app/app/src/test/java/com/ada/messenger/core/AdaModelsTest.kt): все тесты проходят (`BUILD SUCCESSFUL in 40s`).
+  - Тестирование [`ConnectionStatusBarTest.kt`](../../android-app/app/src/test/java/com/ada/messenger/ui/components/ConnectionStatusBarTest.kt) и [`AdaModelsTest.kt`](../../android-app/app/src/test/java/com/ada/messenger/core/AdaModelsTest.kt): все тесты проходят (`BUILD SUCCESSFUL in 40s`).
 - [x] **8.2. Инструментальные UI-тесты Compose:**
-  - Шаг возврата при подтверждении паттерна (`RegStep.CONFIRM` -> `RegStep.DRAW`) в [`PatternRegistrationScreen.kt`](file:///d:/QUADA/android-app/app/src/main/java/com/ada/messenger/ui/screens/PatternRegistrationScreen.kt) проверен и доступен через `secondaryActionLabel`.
+  - Шаг возврата при подтверждении паттерна (`RegStep.CONFIRM` -> `RegStep.DRAW`) в [`PatternRegistrationScreen.kt`](../../android-app/app/src/main/java/com/ada/messenger/ui/screens/PatternRegistrationScreen.kt) проверен и доступен через `secondaryActionLabel`.
 - [x] **8.3. Кросс-платформенная проверка сборки:**
   - Полный прогон `cargo test` с фичей `mobile-dev`: 201 тест пройден без ошибок (181 lib + 20 integration).
   - Сборка Android Debug APK (`:app:assembleDebug`): `BUILD SUCCESSFUL in 23s`.

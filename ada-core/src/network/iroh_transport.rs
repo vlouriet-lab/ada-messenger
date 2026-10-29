@@ -222,12 +222,6 @@ impl IrohTransport {
                             return;
                         }
                     };
-                    if conn.alpn() == crate::network::gossip::GOSSIP_ALPN {
-                        if let Err(e) = gossip_srv2.handle_connection(conn).await {
-                            tracing::debug!("iroh gossip handle_connection error: {}", e);
-                        }
-                        return;
-                    }
                     let node_id_bytes = *conn.remote_id().as_bytes();
                     // Enforce Relay-Only by default: reject direct P2P connections from untrusted peers
                     let is_trusted = trusted_check.read().await.contains(&node_id_bytes);
@@ -244,6 +238,21 @@ impl IrohTransport {
                             conn.close(1u32.into(), b"direct-p2p-requires-trusted-contact");
                             return;
                         }
+                    }
+
+                    if conn.alpn() == crate::network::gossip::GOSSIP_ALPN {
+                        if !is_trusted {
+                            tracing::warn!(
+                                "iroh: rejecting gossip connection from untrusted peer {}",
+                                hex::encode(node_id_bytes)
+                            );
+                            conn.close(2u32.into(), b"gossip-requires-trusted-contact");
+                            return;
+                        }
+                        if let Err(e) = gossip_srv2.handle_connection(conn).await {
+                            tracing::debug!("iroh gossip handle_connection error: {}", e);
+                        }
+                        return;
                     }
                     // Loop over uni- and bi-directional streams from this peer.
                     // Uni-streams carry DMs; bidi-streams carry blob fetch requests.

@@ -586,6 +586,29 @@ class AdaForegroundService : Service() {
             callIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val declineIntent = Intent(this, CallActionReceiver::class.java).apply {
+            action = CallActionReceiver.ACTION_DECLINE_CALL
+            putExtra(CallActionReceiver.EXTRA_CALL_ID, callIdHex)
+            putExtra(CallActionReceiver.EXTRA_PEER_ID, peerIdB64)
+        }
+        val declinePi = PendingIntent.getBroadcast(
+            this, NOTIF_ID_CALL + 1, declineIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
+        val answerIntent = Intent(this, MainActivity::class.java).apply {
+            putExtra(MainActivity.EXTRA_OPEN_CALL, true)
+            putExtra(MainActivity.EXTRA_ANSWER_NOW, true)
+            putExtra(MainActivity.EXTRA_CALL_ID,   callIdHex)
+            putExtra(MainActivity.EXTRA_CALL_PEER,  peerIdB64)
+            putExtra(MainActivity.EXTRA_CALL_VIDEO, hasVideo)
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val answerPi = PendingIntent.getActivity(
+            this, NOTIF_ID_CALL + 2, answerIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
         val showContent = AppLockManager(applicationContext).notificationShowContent
         val callRingtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
         val notif = NotificationCompat.Builder(this, CHANNEL_CALL_ID)
@@ -598,6 +621,16 @@ class AdaForegroundService : Service() {
             .setFullScreenIntent(pi, true)
             .setVibrate(longArrayOf(0, 500, 250, 500, 250, 500))
             .setSound(callRingtoneUri)
+            .addAction(
+                R.drawable.ic_notification,
+                getString(R.string.call_action_decline),
+                declinePi
+            )
+            .addAction(
+                R.drawable.ic_notification,
+                getString(R.string.call_action_answer),
+                answerPi
+            )
             .setVisibility(if (showContent) NotificationCompat.VISIBILITY_PUBLIC else NotificationCompat.VISIBILITY_PRIVATE)
             .setAutoCancel(true)
             .build()

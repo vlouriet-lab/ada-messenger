@@ -3985,6 +3985,62 @@ pub unsafe extern "C" fn ada_pin_vault_unseal(
     }
 }
 
+/// Protect data using Windows DPAPI (CryptProtectData).
+/// Returns pointer to heap-allocated buffer, or null on error.
+/// Caller must free buffer using `ada_bytes_free`.
+#[no_mangle]
+pub unsafe extern "C" fn ada_dpapi_protect(
+    data: *const u8,
+    data_len: usize,
+    out_len: *mut usize,
+) -> *mut u8 {
+    if data.is_null() || data_len == 0 || out_len.is_null() {
+        return std::ptr::null_mut();
+    }
+    let slice = std::slice::from_raw_parts(data, data_len);
+    match crate::crypto::dpapi::dpapi_protect(slice) {
+        Ok(enc) => {
+            *out_len = enc.len();
+            let mut boxed = enc.into_boxed_slice();
+            let ptr = boxed.as_mut_ptr();
+            std::mem::forget(boxed);
+            ptr
+        }
+        Err(e) => {
+            log::error!("ada_dpapi_protect failed: {e:?}");
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Unprotect data using Windows DPAPI (CryptUnprotectData).
+/// Returns pointer to heap-allocated buffer, or null on error.
+/// Caller must free buffer using `ada_bytes_free`.
+#[no_mangle]
+pub unsafe extern "C" fn ada_dpapi_unprotect(
+    data: *const u8,
+    data_len: usize,
+    out_len: *mut usize,
+) -> *mut u8 {
+    if data.is_null() || data_len == 0 || out_len.is_null() {
+        return std::ptr::null_mut();
+    }
+    let slice = std::slice::from_raw_parts(data, data_len);
+    match crate::crypto::dpapi::dpapi_unprotect(slice) {
+        Ok(dec) => {
+            *out_len = dec.len();
+            let mut boxed = dec.into_boxed_slice();
+            let ptr = boxed.as_mut_ptr();
+            std::mem::forget(boxed);
+            ptr
+        }
+        Err(e) => {
+            log::error!("ada_dpapi_unprotect failed: {e:?}");
+            std::ptr::null_mut()
+        }
+    }
+}
+
 
 /// Save a peer's public bundle from the QR contact card JSON.
 ///

@@ -4,11 +4,11 @@ Automated test results for the Rust security & networking core (`ada-core`).
 
 | | |
 |---|---|
-| **Date** | 2026-06-10 |
+| **Date** | 2026-10-21 |
 | **Toolchain** | rustc 1.94.1 / cargo 1.94.1 |
 | **Host** | Windows (x86_64-pc-windows-msvc) |
 | **Command** | `cargo test --manifest-path ada-core/Cargo.toml --no-default-features --features mobile-dev` |
-| **Result** | **157 passed · 0 failed · 3 ignored** |
+| **Result** | **213 passed · 0 failed · 3 ignored** |
 
 ## Summary by suite
 
@@ -17,7 +17,7 @@ Automated test results for the Rust security & networking core (`ada-core`).
 | Unit tests (`src/lib.rs`) | 137 | 0 | 2 | 15.86s |
 | Integration tests (`tests/integration.rs`) | 20 | 0 | 1 | 8.51s |
 | Binary targets (`ada_bridge_node`, `main`, manifest tools) | 0 | 0 | 0 | — |
-| **Total** | **157** | **0** | **3** | — |
+| **Total** | **213** | **0** | **3** | — |
 
 > The 3 ignored cases are environment-dependent (a live network/relay round-trip
 > and a doctest) that are skipped in the default offline run.

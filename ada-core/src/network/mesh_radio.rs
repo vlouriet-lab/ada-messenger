@@ -8,6 +8,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 
@@ -254,6 +255,7 @@ impl CompactFrame {
         msg_id: u16,
         payload: Bytes,
         mtu: usize,
+        ttl: u8,
     ) -> Result<Vec<Self>, WireError> {
         let max_chunk = mtu.saturating_sub(COMPACT_HEADER_SIZE).max(16);
         let total_chunks = (payload.len() + max_chunk - 1) / max_chunk;
@@ -262,6 +264,8 @@ impl CompactFrame {
         if total_chunks > u8::MAX as usize {
             return Err(WireError::PayloadTooLarge);
         }
+
+        let hop_limit = ttl.max(1);
 
         if payload.is_empty() {
             return Ok(vec![Self {
@@ -272,7 +276,7 @@ impl CompactFrame {
                 msg_id,
                 frag_index: 0,
                 frag_total: 1,
-                ttl: 1,
+                ttl: hop_limit,
                 payload: Bytes::new(),
             }]);
         }
@@ -287,7 +291,7 @@ impl CompactFrame {
                 msg_id,
                 frag_index: idx as u8,
                 frag_total: total_chunks as u8,
-                ttl: 1,
+                ttl: hop_limit,
                 payload: Bytes::copy_from_slice(chunk),
             });
         }
@@ -311,7 +315,7 @@ impl CompactFrame {
     }
 
     /// Creates a link-layer acknowledgement frame for a given message.
-    pub fn new_ack(local_short_id: u32, recipient_short_id: u32, msg_id: u16) -> Self {
+    pub fn new_ack(local_short_id: u32, recipient_short_id: u32, msg_id: u16, ttl: u8) -> Self {
         Self {
             version: 1,
             frame_type: FrameType::Ack,
@@ -320,7 +324,7 @@ impl CompactFrame {
             msg_id,
             frag_index: 0,
             frag_total: 1,
-            ttl: 1,
+            ttl: ttl.max(1),
             payload: Bytes::new(),
         }
     }
@@ -389,7 +393,16 @@ pub enum MeshProcessResult {
         received_chunks: usize,
         total_chunks: usize,
     },
-    /// The frame was ignored (addressed to another peer, duplicate, or malformed).
+    /// Multi-hop epidemic mesh packet forwarded to next hops.
+    Forward {
+        forward_frame: Bytes,
+        recipient_short_id: u32,
+        ttl: u8,
+        jitter_ms: u64,
+    },
+    /// Duplicate frame dropped to suppress broadcast storm or routing loop.
+    DuplicateSuppressed,
+    /// The frame was ignored (addressed to another peer with TTL <= 1, or malformed).
     Ignored,
 }
 
@@ -401,6 +414,8 @@ pub struct MeshRadioRouter {
     short_id_map: RwLock<HashMap<u32, [u8; 32]>>,
     dtn_queue: RwLock<HashMap<[u8; 32], Vec<DtnBundle>>>,
     reassembly_buf: RwLock<HashMap<(u32, u16), FragmentBuffer>>,
+    seen_cache: RwLock<HashMap<(u32, u16, u8), Instant>>,
+    persistent_store: RwLock<Option<Arc<crate::storage::KeyValueStore>>>,
 }
 
 impl MeshRadioRouter {
@@ -413,7 +428,14 @@ impl MeshRadioRouter {
             short_id_map: RwLock::new(HashMap::new()),
             dtn_queue: RwLock::new(HashMap::new()),
             reassembly_buf: RwLock::new(HashMap::new()),
+            seen_cache: RwLock::new(HashMap::new()),
+            persistent_store: RwLock::new(None),
         }
+    }
+
+    /// Attaches the persistent SQLite encrypted database for offline DTN storage.
+    pub fn set_persistent_store(&self, store: Arc<crate::storage::KeyValueStore>) {
+        *self.persistent_store.write() = Some(store);
     }
 
     pub fn local_peer_id(&self) -> &[u8; 32] {
@@ -485,6 +507,24 @@ impl MeshRadioRouter {
         encrypted_payload: Bytes,
         ttl: Duration,
     ) {
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let bundle_id = format!("{}_{}_{}", hex::encode(recipient), msg_id, now_secs);
+
+        if let Some(store) = self.persistent_store.read().as_ref() {
+            let _ = store.save_dtn_bundle(
+                &bundle_id,
+                &recipient,
+                msg_id,
+                &encrypted_payload,
+                now_secs,
+                ttl.as_secs(),
+                1,
+            );
+        }
+
         let bundle = DtnBundle {
             msg_id,
             recipient,
@@ -497,15 +537,37 @@ impl MeshRadioRouter {
 
     /// Drains all unexpired DTN bundles queued for the specified peer.
     pub fn drain_dtn(&self, recipient: &[u8; 32]) -> Vec<DtnBundle> {
-        let Some(bundles) = self.dtn_queue.write().remove(recipient) else {
-            return Vec::new();
-        };
-
+        let in_mem = self.dtn_queue.write().remove(recipient).unwrap_or_default();
         let now = Instant::now();
-        bundles
+        let mut valid_bundles: Vec<DtnBundle> = in_mem
             .into_iter()
             .filter(|b| now.duration_since(b.created_at) <= b.ttl)
-            .collect()
+            .collect();
+
+        if let Some(store) = self.persistent_store.read().as_ref() {
+            if let Ok(persisted) = store.load_dtn_bundles_for_recipient(recipient) {
+                let now_secs = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                for p in persisted {
+                    if (p.created_at_secs + p.ttl_secs) < now_secs {
+                        // Purge expired bundle from persistent storage
+                        let _ = store.delete_dtn_bundle(&p.bundle_id);
+                    } else if !valid_bundles.iter().any(|b| b.msg_id == p.msg_id) {
+                        valid_bundles.push(DtnBundle {
+                            msg_id: p.msg_id,
+                            recipient: p.recipient_id,
+                            encrypted_payload: Bytes::from(p.payload),
+                            created_at: Instant::now(),
+                            ttl: Duration::from_secs(p.ttl_secs),
+                        });
+                    }
+                }
+            }
+        }
+
+        valid_bundles
     }
 
     /// Resolves a 4-byte short ID back to the canonical 32-byte Ed25519 identity key.
@@ -513,7 +575,7 @@ impl MeshRadioRouter {
         self.short_id_map.read().get(&short_id).copied()
     }
 
-    /// Processes an incoming raw frame and advances fragmentation/DTN state.
+    /// Processes an incoming raw frame and advances fragmentation/DTN/multi-hop state.
     pub fn process_incoming_frame(
         &self,
         raw_bytes: Bytes,
@@ -528,21 +590,54 @@ impl MeshRadioRouter {
             if frame.payload.len() == 32 {
                 let mut peer_id = [0u8; 32];
                 peer_id.copy_from_slice(&frame.payload);
-                self.update_route(peer_id, transport, hw_addr.clone(), rssi);
+                // Verify sender_short_id matches payload to prevent route poisoning
+                if compute_short_id(&peer_id) == frame.sender_short_id {
+                    self.update_route(peer_id, transport, hw_addr.clone(), rssi);
 
-                return Ok(MeshProcessResult::BeaconDiscovered {
-                    peer_id,
-                    short_id: frame.sender_short_id,
-                    transport,
-                    hardware_addr: hw_addr,
-                });
+                    return Ok(MeshProcessResult::BeaconDiscovered {
+                        peer_id,
+                        short_id: frame.sender_short_id,
+                        transport,
+                        hardware_addr: hw_addr,
+                    });
+                }
             }
             return Ok(MeshProcessResult::Ignored);
         }
 
-        // Verify recipient matches our node or broadcast
+        // Loop detection / Broadcast storm mitigation via SeenCache
+        {
+            let key = (frame.sender_short_id, frame.msg_id, frame.frag_index);
+            let mut seen = self.seen_cache.write();
+            if seen.len() > 512 {
+                let now = Instant::now();
+                seen.retain(|_, t| now.duration_since(*t) < Duration::from_secs(120));
+            }
+            if let Some(seen_at) = seen.get(&key) {
+                if seen_at.elapsed() < Duration::from_secs(120) {
+                    return Ok(MeshProcessResult::DuplicateSuppressed);
+                }
+            }
+            seen.insert(key, Instant::now());
+        }
+
+        // Multi-hop routing: if packet is not for us and not broadcast, forward if TTL > 1
         if frame.recipient_short_id != self.local_short_id && frame.recipient_short_id != BROADCAST_SHORT_ID {
-            return Ok(MeshProcessResult::Ignored);
+            if frame.ttl > 1 {
+                let mut forwarded = frame.clone();
+                forwarded.ttl = frame.ttl.saturating_sub(1);
+                let forward_frame = forwarded.encode();
+                // Truly random per-node jitter (50..250ms) to prevent simultaneous broadcast collisions
+                let jitter_ms = 50 + (rand::random::<u64>() % 200);
+                return Ok(MeshProcessResult::Forward {
+                    forward_frame,
+                    recipient_short_id: frame.recipient_short_id,
+                    ttl: forwarded.ttl,
+                    jitter_ms,
+                });
+            } else {
+                return Ok(MeshProcessResult::Ignored);
+            }
         }
 
         // Update routing metrics if the sender identity is already indexed
@@ -560,6 +655,9 @@ impl MeshRadioRouter {
 
         // 3. Process Data frames (fragment reassembly)
         if frame.frame_type == FrameType::DataConfirm || frame.frame_type == FrameType::DataNonConf {
+            if frame.frag_total == 0 || frame.frag_index >= frame.frag_total {
+                return Ok(MeshProcessResult::Ignored);
+            }
             let key = (frame.sender_short_id, frame.msg_id);
             let mut complete_bytes = None;
             let total = frame.frag_total as usize;
@@ -580,6 +678,10 @@ impl MeshRadioRouter {
                     chunks: BTreeMap::new(),
                     created_at: Instant::now(),
                 });
+
+                if entry.total != frame.frag_total {
+                    return Ok(MeshProcessResult::Ignored);
+                }
 
                 entry.chunks.insert(frame.frag_index, frame.payload);
                 received_chunks = entry.chunks.len();
@@ -689,6 +791,7 @@ mod tests {
             100,
             large_payload.clone(),
             180,
+            4,
         )
         .unwrap();
 
@@ -764,5 +867,68 @@ mod tests {
 
         // Queue is now empty
         assert!(router.drain_dtn(&peer).is_empty());
+    }
+
+    #[test]
+    fn test_multihop_forwarding_and_ttl() {
+        let node_a_pub = [10u8; 32];
+        let node_b_pub = [20u8; 32];
+        let node_c_pub = [30u8; 32];
+
+        let short_a = compute_short_id(&node_a_pub);
+        let short_c = compute_short_id(&node_c_pub);
+
+        let router_b = MeshRadioRouter::new(node_b_pub);
+
+        let frame = CompactFrame {
+            version: 1,
+            frame_type: FrameType::DataNonConf,
+            sender_short_id: short_a,
+            recipient_short_id: short_c,
+            msg_id: 777,
+            frag_index: 0,
+            frag_total: 1,
+            ttl: 3,
+            payload: Bytes::from_static(b"Multi-hop Payload"),
+        };
+
+        let res = router_b
+            .process_incoming_frame(
+                frame.encode(),
+                RadioTransportKind::BleCodedPhy,
+                "mac-a".into(),
+                -70,
+            )
+            .unwrap();
+
+        match res {
+            MeshProcessResult::Forward {
+                forward_frame,
+                recipient_short_id,
+                ttl,
+                jitter_ms,
+            } => {
+                assert_eq!(recipient_short_id, short_c);
+                assert_eq!(ttl, 2);
+                assert!(jitter_ms >= 50 && jitter_ms <= 250);
+
+                let decoded = CompactFrame::decode(forward_frame).unwrap();
+                assert_eq!(decoded.ttl, 2);
+                assert_eq!(decoded.sender_short_id, short_a);
+                assert_eq!(decoded.recipient_short_id, short_c);
+                assert_eq!(decoded.payload, b"Multi-hop Payload"[..]);
+            }
+            _ => panic!("Expected MeshProcessResult::Forward"),
+        }
+
+        let dup = router_b
+            .process_incoming_frame(
+                frame.encode(),
+                RadioTransportKind::BleCodedPhy,
+                "mac-a".into(),
+                -70,
+            )
+            .unwrap();
+        assert!(matches!(dup, MeshProcessResult::DuplicateSuppressed));
     }
 }

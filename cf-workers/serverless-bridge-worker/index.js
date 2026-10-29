@@ -288,18 +288,36 @@ export class AdaBridge extends DurableObject {
     this.rateBuckets.set(key, bucket);
   }
 
-  enforceMailboxRateLimits(request, peerId) {
+  enforceMailboxIpRateLimit(request) {
     const specs = this.specs();
-    const peerHex = toHex(fromArray(peerId, 32, "peer_id"));
     this.enforceRateLimit(`mailbox:ip:${clientIp(request)}`, specs.mailboxIp);
+  }
+
+  enforceMailboxPeerRateLimit(peerHex) {
+    const specs = this.specs();
     this.enforceRateLimit(`mailbox:peer:${peerHex}`, specs.mailboxPeer);
   }
 
-  enforceWsRegisterRateLimits(clientIpValue, peerId) {
-    const specs = this.specs();
+  enforceMailboxRateLimits(request, peerId) {
+    this.enforceMailboxIpRateLimit(request);
     const peerHex = toHex(fromArray(peerId, 32, "peer_id"));
+    this.enforceMailboxPeerRateLimit(peerHex);
+  }
+
+  enforceWsRegisterIpRateLimit(clientIpValue) {
+    const specs = this.specs();
     this.enforceRateLimit(`ws-register:ip:${clientIpValue || "unknown"}`, specs.wsRegisterIp);
+  }
+
+  enforceWsRegisterPeerRateLimit(peerHex) {
+    const specs = this.specs();
     this.enforceRateLimit(`ws-register:peer:${peerHex}`, specs.wsRegisterPeer);
+  }
+
+  enforceWsRegisterRateLimits(clientIpValue, peerId) {
+    this.enforceWsRegisterIpRateLimit(clientIpValue);
+    const peerHex = toHex(fromArray(peerId, 32, "peer_id"));
+    this.enforceWsRegisterPeerRateLimit(peerHex);
   }
 
   recordHttpRateLimit() {
@@ -449,7 +467,7 @@ export class AdaBridge extends DurableObject {
   async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === "/healthz") {
-      return responseJson(await this.healthValue());
+      return responseJson({ ok: true, status: "healthy" });
     }
 
     if (
@@ -460,6 +478,12 @@ export class AdaBridge extends DurableObject {
     }
 
     if (url.pathname === "/ops/status") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const queryToken = url.searchParams.get("token") || "";
+      const expectedToken = (this.env?.OPS_TOKEN || "").trim();
+      if (!expectedToken || (authHeader !== `Bearer ${expectedToken}` && queryToken !== expectedToken)) {
+        return new Response("not found", { status: 404 });
+      }
       return responseJson(await this.statusValue());
     }
 
@@ -572,7 +596,7 @@ export class AdaBridge extends DurableObject {
     try {
       const payload = await this.parseJsonRequest(request);
       try {
-        this.enforceMailboxRateLimits(request, payload.sender);
+        this.enforceMailboxIpRateLimit(request);
       } catch (error) {
         if (error?.rateLimited) this.recordHttpRateLimit();
         throw error;
@@ -589,6 +613,12 @@ export class AdaBridge extends DurableObject {
         payload.auth,
         httpPushChallenge(payload.envelope, payload.auth),
       );
+      try {
+        this.enforceMailboxPeerRateLimit(senderHex);
+      } catch (error) {
+        if (error?.rateLimited) this.recordHttpRateLimit();
+        throw error;
+      }
       const { disposition, queueDepth } = await this.queueEnvelope(payload.envelope);
       return responseJson({
         disposition,
@@ -610,7 +640,7 @@ export class AdaBridge extends DurableObject {
     try {
       const payload = await this.parseJsonRequest(request);
       try {
-        this.enforceMailboxRateLimits(request, payload.peer_id);
+        this.enforceMailboxIpRateLimit(request);
       } catch (error) {
         if (error?.rateLimited) this.recordHttpRateLimit();
         throw error;
@@ -621,6 +651,12 @@ export class AdaBridge extends DurableObject {
         payload.auth,
         httpPullChallenge(payload.peer_id, payload.auth),
       );
+      try {
+        this.enforceMailboxPeerRateLimit(peerHex);
+      } catch (error) {
+        if (error?.rateLimited) this.recordHttpRateLimit();
+        throw error;
+      }
       this.store.evictExpired();
       return responseJson({
         envelopes: this.store.pendingEnvelopes(peerHex, this.limits.maxPullPerRequest),
@@ -640,7 +676,7 @@ export class AdaBridge extends DurableObject {
     try {
       const payload = await this.parseJsonRequest(request);
       try {
-        this.enforceMailboxRateLimits(request, payload.peer_id);
+        this.enforceMailboxIpRateLimit(request);
       } catch (error) {
         if (error?.rateLimited) this.recordHttpRateLimit();
         throw error;
@@ -651,6 +687,12 @@ export class AdaBridge extends DurableObject {
         payload.auth,
         httpAckChallenge(payload.peer_id, payload.message_ids || [], payload.auth),
       );
+      try {
+        this.enforceMailboxPeerRateLimit(peerHex);
+      } catch (error) {
+        if (error?.rateLimited) this.recordHttpRateLimit();
+        throw error;
+      }
       const ids = (payload.message_ids || [])
         .slice(0, MAX_ACK_IDS_PER_REQUEST)
         .map((id) => toHex(fromArray(id, 16, "message_id")));
@@ -725,7 +767,16 @@ export class AdaBridge extends DurableObject {
     session.peerHex = peerHex;
     session.listenForMailbox = Boolean(payload.listen_for_mailbox);
     if (session.listenForMailbox) {
+      const existing = this.livePeers.get(peerHex);
+      if (existing && existing !== ws) {
+        try {
+          existing.close(1000, "replaced by new session");
+        } catch {
+          // ignore
+        }
+      }
       this.livePeers.set(peerHex, ws);
+      this.liveInflight.delete(peerHex);
     }
 
     this.store.evictExpired();
@@ -827,24 +878,32 @@ export class AdaBridge extends DurableObject {
           ws.send(encodeFrame("Error", { message: `unsupported frame ${kind}` }));
       }
     } catch (error) {
-        // The socket is gone, so nothing is in flight any more; a reconnect must
-        // be free to re-push every unacked envelope.
+      const session = this.sessions.get(ws);
+      if (session?.peerHex) {
         this.liveInflight.delete(session.peerHex);
-      ws.send(
-        encodeFrame("Error", {
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
+      }
+      try {
+        ws.send(
+          encodeFrame("Error", {
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      } catch {
+        // no-op if socket already dead
+      }
     }
   }
 
   handleClose(ws) {
     const session = this.sessions.get(ws);
-    if (session?.listenForMailbox && session.peerHex) {
-      const current = this.livePeers.get(session.peerHex);
-      if (current === ws) {
-        this.livePeers.delete(session.peerHex);
+    if (session?.peerHex) {
+      if (session.listenForMailbox) {
+        const current = this.livePeers.get(session.peerHex);
+        if (current === ws) {
+          this.livePeers.delete(session.peerHex);
+        }
       }
+      this.liveInflight.delete(session.peerHex);
     }
     this.sessions.delete(ws);
     try {

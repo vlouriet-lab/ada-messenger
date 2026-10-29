@@ -70,6 +70,12 @@ class DesktopAdaCore private constructor(private val handle: Long) {
             envelope: ByteArray,
         ): ByteArray?
 
+        @JvmStatic
+        private external fun nativeDpapiProtect(data: ByteArray): ByteArray?
+
+        @JvmStatic
+        private external fun nativeDpapiUnprotect(data: ByteArray): ByteArray?
+
         fun patternValidateRegistration(cells: ByteArray): Boolean {
             if (cells.size != 32) return false
             DesktopAdaCoreLoader.ensureLoaded()
@@ -94,6 +100,18 @@ class DesktopAdaCore private constructor(private val handle: Long) {
             if (pin.isBlank() || protocolAnchor.size != 32 || vaultBlob.isEmpty()) return null
             DesktopAdaCoreLoader.ensureLoaded()
             return nativePinVaultUnseal(pin, protocolAnchor, vaultBlob)
+        }
+
+        fun dpapiProtect(data: ByteArray): ByteArray? {
+            if (data.isEmpty()) return null
+            DesktopAdaCoreLoader.ensureLoaded()
+            return nativeDpapiProtect(data)
+        }
+
+        fun dpapiUnprotect(data: ByteArray): ByteArray? {
+            if (data.isEmpty()) return null
+            DesktopAdaCoreLoader.ensureLoaded()
+            return nativeDpapiUnprotect(data)
         }
 
 
@@ -145,8 +163,8 @@ class DesktopAdaCore private constructor(private val handle: Long) {
         }
     }
 
-    @Volatile
-    private var closed = false
+    private val freed = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val handleLock = java.util.concurrent.locks.ReentrantReadWriteLock()
 
     private external fun nativeGetPeerId(handle: Long): String?
     private external fun nativeGetDisplayName(handle: Long): String?
@@ -171,6 +189,34 @@ class DesktopAdaCore private constructor(private val handle: Long) {
     private external fun nativeHangup(handle: Long, callIdHex: String, peerIdB64: String): Int
     private external fun nativeDeclineCall(handle: Long, callIdHex: String, peerIdB64: String): Int
     private external fun nativeHangupGroupCallRoom(handle: Long, sessionIdHex: String): Int
+    private external fun nativeCallInGroupRoom(
+        handle: Long,
+        peerIdB64: String,
+        offerSdp: String,
+        groupIdHex: String,
+        sessionIdHex: String,
+        hasVideo: Int,
+    ): String?
+    private external fun nativeStartGroupCall(
+        handle: Long,
+        groupIdHex: String,
+        offerSdp: String,
+        hasVideo: Int,
+    ): String?
+    private external fun nativeJoinGroupCall(
+        handle: Long,
+        groupIdHex: String,
+        sessionIdHex: String,
+        offerSdp: String,
+        hasVideo: Int,
+    ): String?
+    private external fun nativeAttachCallToGroupRoom(
+        handle: Long,
+        callIdHex: String,
+        groupIdHex: String,
+        sessionIdHex: String,
+        hasVideo: Int,
+    ): Int
     private external fun nativeSendIceCandidate(
         handle: Long,
         callIdHex: String,
@@ -355,6 +401,31 @@ class DesktopAdaCore private constructor(private val handle: Long) {
     fun hangupGroupCallRoom(sessionIdHex: String): Boolean =
         withHandle { nativeHangupGroupCallRoom(it, sessionIdHex) == 0 } ?: false
 
+    fun startGroupCall(groupIdHex: String, offerSdp: String = "", hasVideo: Boolean = false): String? =
+        withHandle { nativeStartGroupCall(it, groupIdHex, offerSdp, if (hasVideo) 1 else 0) }
+
+    fun joinGroupCall(groupIdHex: String, sessionIdHex: String, offerSdp: String = "", hasVideo: Boolean = false): String? =
+        withHandle { nativeJoinGroupCall(it, groupIdHex, sessionIdHex, offerSdp, if (hasVideo) 1 else 0) }
+
+    fun callInGroupRoom(
+        peerIdB64: String,
+        offerSdp: String,
+        groupIdHex: String,
+        sessionIdHex: String,
+        hasVideo: Boolean,
+    ): String? = withHandle {
+        nativeCallInGroupRoom(it, peerIdB64, offerSdp, groupIdHex, sessionIdHex, if (hasVideo) 1 else 0)
+    }
+
+    fun attachCallToGroupRoom(
+        callIdHex: String,
+        groupIdHex: String,
+        sessionIdHex: String,
+        hasVideo: Boolean,
+    ): Boolean = withHandle {
+        nativeAttachCallToGroupRoom(it, callIdHex, groupIdHex, sessionIdHex, if (hasVideo) 1 else 0) == 0
+    } ?: false
+
     fun declineCallDetailed(callIdHex: String, peerIdB64: String): DesktopCallControlResult =
         withHandle { activeHandle ->
             val ok = nativeDeclineCall(activeHandle, callIdHex, peerIdB64) == 0
@@ -492,15 +563,26 @@ class DesktopAdaCore private constructor(private val handle: Long) {
     } ?: DesktopBridgeOperationResult(false)
 
     fun close() {
-        synchronized(this) {
-            if (closed) return
-            nativeFree(handle)
-            closed = true
+        if (freed.compareAndSet(false, true)) {
+            val writeLock = handleLock.writeLock()
+            writeLock.lock()
+            try {
+                nativeFree(handle)
+            } finally {
+                writeLock.unlock()
+            }
         }
     }
 
-    private inline fun <T> withHandle(block: (Long) -> T): T? = synchronized(this) {
-        if (closed) null else block(handle)
+    private inline fun <T> withHandle(block: (Long) -> T): T? {
+        val readLock = handleLock.readLock()
+        readLock.lock()
+        try {
+            if (freed.get()) return null
+            return block(handle)
+        } finally {
+            readLock.unlock()
+        }
     }
 }
 

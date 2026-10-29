@@ -38,11 +38,22 @@ class DesktopIdentityStore private constructor(private val baseDir: Path) {
     private fun getOrCreateProtocolAnchor(): ByteArray {
         if (Files.isRegularFile(protocolAnchorPath)) {
             val bytes = Files.readAllBytes(protocolAnchorPath)
-            if (bytes.size == 32) return bytes
+            val decrypted = runCatching { DesktopAdaCore.dpapiUnprotect(bytes) }.getOrNull()
+            if (decrypted != null && decrypted.size == 32) {
+                return decrypted
+            }
+            if (bytes.size == 32) {
+                val protected = runCatching { DesktopAdaCore.dpapiProtect(bytes) }.getOrNull()
+                if (protected != null) {
+                    runCatching { Files.write(protocolAnchorPath, protected) }
+                }
+                return bytes
+            }
         }
         val fresh = ByteArray(32).also(SecureRandom()::nextBytes)
         Files.createDirectories(baseDir)
-        Files.write(protocolAnchorPath, fresh)
+        val protected = runCatching { DesktopAdaCore.dpapiProtect(fresh) }.getOrNull() ?: fresh
+        Files.write(protocolAnchorPath, protected)
         return fresh
     }
 
@@ -140,6 +151,7 @@ class DesktopIdentityStore private constructor(private val baseDir: Path) {
         Files.deleteIfExists(metaPath)
         Files.deleteIfExists(pinVaultPath)
         Files.deleteIfExists(pinUnlockPath)
+        Files.deleteIfExists(protocolAnchorPath)
     }
 
     fun decryptCellsWithPin(pin: String): ByteArray? {

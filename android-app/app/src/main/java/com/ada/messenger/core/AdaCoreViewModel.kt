@@ -404,13 +404,25 @@ class AdaCoreViewModel(private val appContext: Context) : ViewModel() {
     fun clearPendingNav() { _pendingNavConv.value = null }
     fun clearPendingOpenCallScreen() { _pendingOpenCallScreen.value = false }
 
-    fun openFromCallNotification(callIdHex: String, peerIdB64: String, hasVideo: Boolean) {
+    fun openFromCallNotification(callIdHex: String, peerIdB64: String, hasVideo: Boolean, answerNow: Boolean = false) {
         // Do not recreate incoming call if a call is already active or in progress
         if (callManager.activeCall.value == null) {
-            if (callManager.incomingCall.value?.callIdHex != callIdHex) {
+            val currentIncoming = callManager.incomingCall.value
+            if (currentIncoming == null || currentIncoming.callIdHex != callIdHex) {
                 callManager.onIncomingCallEvent(callIdHex, peerIdB64, hasVideo, offerSdp = "")
             }
-            _pendingNavCall.value = callManager.incomingCall.value
+            if (answerNow) {
+                callManager.answerCall(callIdHex, peerIdB64)
+            }
+            _pendingNavCall.value = callManager.incomingCall.value ?: callManager.activeCall.value?.let {
+                IncomingCallInfo(
+                    callIdHex = it.callIdHex,
+                    peerIdB64 = it.peerIdB64,
+                    hasVideo = it.hasVideo,
+                    offerSdp = "",
+                    displayName = it.displayName,
+                )
+            }
         }
     }
     fun clearPendingCallNav() { _pendingNavCall.value = null }
@@ -452,6 +464,7 @@ class AdaCoreViewModel(private val appContext: Context) : ViewModel() {
                         _irohUp.value = true
                     }
                     loadBridgeStatus()
+                    callManager.onNetworkChanged()
                 }
             }
 
@@ -1882,23 +1895,36 @@ class AdaCoreViewModel(private val appContext: Context) : ViewModel() {
 
                 val sealedB64 = c.sealSyncPushJson(chatMsgJson) ?: return@launch
 
-                // POST to desktop sync server.
-                val conn = (java.net.URL(syncUrl).openConnection() as java.net.HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    setRequestProperty("Content-Type", "application/octet-stream")
-                    connectTimeout = 5_000
-                    readTimeout = 10_000
-                    doOutput = true
-                }
-                try {
-                    val bodyBytes = sealedB64.toByteArray(Charsets.UTF_8)
-                    DesktopSyncAuth.applyHeaders(conn, linkKeyHex, "POST", "/sync", sealedB64)
-                    conn.setRequestProperty("Content-Length", bodyBytes.size.toString())
-                    conn.outputStream.use { it.write(bodyBytes) }
-                    val code = conn.responseCode
+                // POST to desktop sync server via direct socket HTTP (bypasses cleartext restriction).
+                val parsedSync = java.net.URL(syncUrl)
+                val syncHost = parsedSync.host
+                val syncPort = if (parsedSync.port > 0) parsedSync.port else 80
+                val bodyBytes = sealedB64.toByteArray(Charsets.UTF_8)
+                val authHeaders = DesktopSyncAuth.computeHeaderMap(linkKeyHex, "POST", "/sync", sealedB64)
+
+                java.net.Socket().use { sock ->
+                    sock.connect(java.net.InetSocketAddress(syncHost, syncPort), 5_000)
+                    sock.soTimeout = 10_000
+                    val out = sock.getOutputStream()
+                    val req = buildString {
+                        append("POST /sync HTTP/1.1\r\n")
+                        append("Host: $syncHost:$syncPort\r\n")
+                        append("Content-Type: application/octet-stream\r\n")
+                        append("Content-Length: ${bodyBytes.size}\r\n")
+                        append("Connection: close\r\n")
+                        for ((k, v) in authHeaders) {
+                            append("$k: $v\r\n")
+                        }
+                        append("\r\n")
+                    }
+                    out.write(req.toByteArray(Charsets.US_ASCII))
+                    out.write(bodyBytes)
+                    out.flush()
+
+                    val reader = java.io.BufferedReader(java.io.InputStreamReader(sock.getInputStream(), Charsets.US_ASCII))
+                    val statusLine = reader.readLine().orEmpty()
+                    val code = statusLine.split(" ").getOrNull(1)?.toIntOrNull() ?: 500
                     Log.d(TAG, "sync push to desktop: HTTP $code")
-                } finally {
-                    conn.disconnect()
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "pushSyncToDesktop failed: ${e.message}")
@@ -2011,7 +2037,14 @@ class AdaCoreViewModel(private val appContext: Context) : ViewModel() {
                 }
                 callManager.onIncomingCallEvent(callId, peer, video, offer, groupIdHex, sessionIdHex, participants)
                 val dispName = callManager.incomingCall.value?.displayName ?: peer
-                NotificationHelper.postIncomingCall(appContext, callId, dispName.ifBlank { peer }, video, appLock.notificationShowContent)
+                NotificationHelper.postIncomingCall(
+                    context = appContext,
+                    callIdHex = callId,
+                    peerDisplay = dispName.ifBlank { peer },
+                    peerIdB64 = peer,
+                    hasVideo = video,
+                    showContent = appLock.notificationShowContent,
+                )
             }
             "IceCandidate" -> callManager.onIceCandidateEvent(
                 event.raw.optString("call_id", ""),

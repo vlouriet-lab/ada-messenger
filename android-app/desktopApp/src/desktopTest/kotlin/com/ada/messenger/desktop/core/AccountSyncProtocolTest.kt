@@ -31,7 +31,7 @@ class AccountSyncProtocolTest {
     @Test
     fun wifiLinkServerAcceptsEncryptedSnapshotPayload() {
         val snapshotJson = JSONObject()
-            .put("identity", JSONObject().put("display_name", "sync-test"))
+            .put("identity", JSONObject().put("display_name", "sync-test-тест-🚀-пользователь"))
             .put("link_key", Base64.getEncoder().encodeToString(ByteArray(32) { it.toByte() }))
             .toString()
         val receivedSnapshot = CompletableFuture<String>()
@@ -73,7 +73,7 @@ class AccountSyncProtocolTest {
 
         try {
             server.start()
-            val syncUrl = "http://${localServerHost()}:${server.port}/sync"
+            val syncUrl = "http://${server.host}:${server.port}/sync"
             val nonce = ByteArray(16) { (0xA0 + it).toByte() }
             val headers = hmacHeaders(linkKeyHex, nonce, body)
 

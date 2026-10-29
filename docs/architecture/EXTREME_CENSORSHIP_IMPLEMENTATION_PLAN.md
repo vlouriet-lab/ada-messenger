@@ -501,7 +501,7 @@ Definition of done:
 7. В рамках фазы 5 теперь появился и первый hostile-network harness на уровне Rust integration tests: blocked-QUIC -> live bridge, allowlist-only -> mailbox/store-and-forward и fallback с нерабочего bridge-профиля на рабочий.
 8. Для локального прогона harness добавлен runner `run-hostile-network-harness.ps1`, который запускает только hostile-network сценарии поверх `cargo test --test integration`, а CI теперь гоняет hostile-network набор отдельным явным шагом.
 9. Bridge/client observability для phase 5 теперь закрыта кодом: client-side `get_bridge_status_json()` экспортирует route success telemetry и mailbox high-water mark, а reference bridge backend отдаёт `/ops/status` и `/healthz`.
-10. Repo-side phase 5 артефакты теперь присутствуют явно: [SECURITY_REVIEW_MAILBOX_MANIFEST.md](SECURITY_REVIEW_MAILBOX_MANIFEST.md), [OPS_DASHBOARDS_ALERTING.md](OPS_DASHBOARDS_ALERTING.md) и [CANARY_ROLLBACK_PLAYBOOK.md](CANARY_ROLLBACK_PLAYBOOK.md).
+10. Repo-side phase 5 артефакты теперь присутствуют явно: [SECURITY_REVIEW_MAILBOX_MANIFEST.md](../audits/SECURITY_REVIEW_MAILBOX_MANIFEST.md), [OPS_DASHBOARDS_ALERTING.md](OPS_DASHBOARDS_ALERTING.md) и [CANARY_ROLLBACK_PLAYBOOK.md](CANARY_ROLLBACK_PLAYBOOK.md).
 11. Оставшийся operational tail относится уже не к отсутствующим артефактам в репозитории, а к выполнению реального canary/device-matrix на живой fleet и устройствах.
 12. Replay-risk из security review закрыт кодом: bridge register/push/pull/ack теперь подписывают fresh nonce/timestamp auth payload, а backend отклоняет stale auth и seen nonce; валидация после hardening: `cargo test --lib` -> `84 passed`, hostile-network harness -> `3 passed`, `cargo build --bin ada-bridge-node` -> success.
 13. Explicit mailbox/register rate limiting теперь тоже закрыт кодом: reference bridge backend применяет per-IP и per-peer token bucket до auth verify, экспортирует `rate_limited_total`/`http_rate_limited_total`/`ws_rate_limited_total` в `/ops/status`, а дальнейший хвост по теме сводится уже к production calibration на canary telemetry.
@@ -843,7 +843,7 @@ Gate выхода:
 Артефакты фазы:
 
 1. Test harness для цензурных сценариев. Первая воспроизводимая версия уже есть в Rust integration tests, локальном runner `run-hostile-network-harness.ps1` и отдельном CI-шаге hostile-network harness.
-2. Security review report: [SECURITY_REVIEW_MAILBOX_MANIFEST.md](SECURITY_REVIEW_MAILBOX_MANIFEST.md).
+2. Security review report: [SECURITY_REVIEW_MAILBOX_MANIFEST.md](../audits/SECURITY_REVIEW_MAILBOX_MANIFEST.md).
 3. Операционные дашборды и alerting: [OPS_DASHBOARDS_ALERTING.md](OPS_DASHBOARDS_ALERTING.md).
 4. Canary/rollback playbook: [CANARY_ROLLBACK_PLAYBOOK.md](CANARY_ROLLBACK_PLAYBOOK.md).
 

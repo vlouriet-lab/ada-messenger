@@ -14,11 +14,14 @@
 name: Release
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
         description: 'Release tag (e.g. v0.5.0-beta)'
-        required: true
+        required: false
 
 env:
   RUST_BACKTRACE: 1
@@ -129,7 +132,7 @@ jobs:
       - name: Сборка fat APK (все ABI)
         working-directory: android-app
         run: |
-          ./gradlew :app:assembleQuasiRelease \
+          ./gradlew :app:assembleRelease \
             -Pada.skipNativeBuild=true \
             --console=plain --no-daemon
 
@@ -138,21 +141,22 @@ jobs:
           TAG="${{ github.ref_name }}"
           [[ -z "$TAG" ]] && TAG="${{ inputs.tag }}"
           [[ -z "$TAG" ]] && TAG="manual"
-          APK_SRC=$(find android-app/app/build/outputs/apk -name "*.apk" | head -1)
+          APK_SRC=$(find android-app/app/build/outputs/apk/release -name "*.apk" | head -1)
           cp "$APK_SRC" "ada-messenger-${TAG}.apk"
 
       # === Arm64-only APK (только aarch64-linux-android) ===
       # Убираем armeabi-v7a и x86_64 .so — Gradle включит только arm64-v8a.
       # Большинство устройств с Android 8+ — arm64. Размер APK ~40% меньше.
-      - name: Удаление non-arm64 библиотек
+      - name: Удаление non-arm64 библиотек и очистка предыдущих APK
         run: |
           rm -rf android-app/app/src/main/jniLibs/armeabi-v7a \
                  android-app/app/src/main/jniLibs/x86_64
+          rm -rf android-app/app/build/outputs/apk
 
       - name: Сборка arm64-only APK
         working-directory: android-app
         run: |
-          ./gradlew :app:assembleQuasiRelease \
+          ./gradlew :app:assembleRelease \
             -Pada.skipNativeBuild=true \
             --console=plain --no-daemon
 
@@ -161,7 +165,7 @@ jobs:
           TAG="${{ github.ref_name }}"
           [[ -z "$TAG" ]] && TAG="${{ inputs.tag }}"
           [[ -z "$TAG" ]] && TAG="manual"
-          APK_SRC=$(find android-app/app/build/outputs/apk -name "*.apk" | head -1)
+          APK_SRC=$(find android-app/app/build/outputs/apk/release -name "*.apk" | head -1)
           cp "$APK_SRC" "ada-messenger-${TAG}-arm64.apk"
 
       - uses: actions/upload-artifact@v4

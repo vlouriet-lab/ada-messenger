@@ -296,6 +296,425 @@ impl DpiMorpher {
         }
         Ok(mask)
     }
+
+    /// Calculate the Shannon entropy in bits/byte (0.0 to 8.0) of any byte buffer.
+    pub fn shannon_entropy(data: &[u8]) -> f64 {
+        calculate_shannon_entropy(data)
+    }
+
+    /// Process an inbound packet with active probing defense, returning authentic traffic
+    /// or a realistic decoy response to confound active network scanners.
+    pub fn process_with_probe_defense(
+        &self,
+        packet: &[u8],
+        decoy_server: &str,
+    ) -> ProbeDefenseResult {
+        let defense = DpiProbeDefense::new(self.clone(), decoy_server);
+        defense.process_inbound(packet)
+    }
+}
+
+/// Computes the Shannon entropy in bits per byte (0.0 to 8.0) of a byte slice.
+///
+/// Plaintext and ASCII text typically scores < 5.0.
+/// Encrypted or pseudorandom data scores close to 8.0 (~ 7.8 - 7.99).
+pub fn calculate_shannon_entropy(data: &[u8]) -> f64 {
+    if data.is_empty() {
+        return 0.0;
+    }
+    let mut counts = [0usize; 256];
+    for &b in data {
+        counts[b as usize] += 1;
+    }
+    let len_f = data.len() as f64;
+    let mut entropy = 0.0;
+    for &c in &counts {
+        if c > 0 {
+            let p = c as f64 / len_f;
+            entropy -= p * p.log2();
+        }
+    }
+    entropy
+}
+
+/// Detected protocol classification produced by DPI traffic sniffer.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum DetectedProtocol {
+    /// Valid TLS 1.2 / 1.3 Record (0x14..=0x18, 0x03, 0x01..=0x03)
+    TlsRecord {
+        content_type: u8,
+        version: (u8, u8),
+        record_len: usize,
+    },
+    /// Plaintext HTTP request (GET, POST, HEAD, OPTIONS)
+    HttpPlaintext {
+        method: String,
+        path: String,
+    },
+    /// WireGuard handshake initiation packet (type 0x01, 3 zero bytes, 148 bytes total)
+    WireguardHandshake,
+    /// BitTorrent P2P handshake (starts with \x13BitTorrent protocol)
+    BitTorrentP2p,
+    /// Raw unmasked QUIC Initial packet (0xC0..=0xFF with QUIC version)
+    RawQuicInitial,
+    /// High entropy (> 7.5 bits/byte) without valid TLS framing (Shadowsocks/VMess signature)
+    UnstructuredHighEntropy,
+    /// Structured or plain binary / unknown low-entropy payload
+    UnknownPlaintext,
+}
+
+impl DetectedProtocol {
+    /// Sniff protocol characteristics and heuristics from a raw packet.
+    pub fn sniff(data: &[u8]) -> Self {
+        if data.is_empty() {
+            return DetectedProtocol::UnknownPlaintext;
+        }
+
+        // Check for TLS record: [content_type, 0x03, 0x01..=0x03, len_hi, len_lo]
+        if data.len() >= 5 {
+            let ct = data[0];
+            let v_major = data[1];
+            let v_minor = data[2];
+            // Valid TLS content types: 20 (ChangeCipherSpec), 21 (Alert), 22 (Handshake), 23 (Application Data), 24 (Heartbeat)
+            if (20..=24).contains(&ct) && v_major == 0x03 && (1..=3).contains(&v_minor) {
+                let declared_len = u16::from_be_bytes([data[3], data[4]]) as usize;
+                return DetectedProtocol::TlsRecord {
+                    content_type: ct,
+                    version: (v_major, v_minor),
+                    record_len: declared_len,
+                };
+            }
+        }
+
+        // Check for WireGuard initiation (148 bytes, byte[0] == 0x01, bytes[1..4] == 0)
+        if data.len() == 148
+            && data[0] == 0x01
+            && data[1] == 0x00
+            && data[2] == 0x00
+            && data[3] == 0x00
+        {
+            return DetectedProtocol::WireguardHandshake;
+        }
+
+        // Check for BitTorrent P2P handshake
+        if data.len() >= 20 && data.starts_with(b"\x13BitTorrent protocol") {
+            return DetectedProtocol::BitTorrentP2p;
+        }
+
+        // Check for HTTP plaintext
+        if data.starts_with(b"GET ")
+            || data.starts_with(b"POST ")
+            || data.starts_with(b"HEAD ")
+            || data.starts_with(b"OPTIONS ")
+        {
+            let line = String::from_utf8_lossy(&data[..data.len().min(128)]);
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 2 {
+                return DetectedProtocol::HttpPlaintext {
+                    method: parts[0].to_string(),
+                    path: parts[1].to_string(),
+                };
+            }
+        }
+
+        // Check for raw QUIC Initial packet (Long header: 0x80 bit set, version 1 or 2)
+        if data.len() >= 9 && (data[0] & 0x80) != 0 {
+            let version = u32::from_be_bytes([data[1], data[2], data[3], data[4]]);
+            if version == 0x00000001 || version == 0x6b333e36 || version == 0x709a50c4 {
+                return DetectedProtocol::RawQuicInitial;
+            }
+        }
+
+        // Entropy-based detection for unstructured proxies
+        let entropy = calculate_shannon_entropy(data);
+        if entropy > 7.5 && data.len() >= 32 {
+            DetectedProtocol::UnstructuredHighEntropy
+        } else {
+            DetectedProtocol::UnknownPlaintext
+        }
+    }
+}
+
+/// Verdict issued by the DPI censorship emulator when inspecting a packet.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CensorVerdict {
+    /// Packet passes inspection
+    Pass {
+        protocol: DetectedProtocol,
+        entropy: f64,
+    },
+    /// Packet is blocked / dropped by the censor
+    Block {
+        reason: String,
+        detected: DetectedProtocol,
+        entropy: f64,
+    },
+    /// Censor marks endpoint as suspicious and dispatches an active probe
+    TriggerActiveProbe {
+        probe_type: ActiveProbeType,
+        reason: String,
+    },
+}
+
+/// Category of active probe dispatched by a censor middlebox (e.g. TSPU / GFW).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ActiveProbeType {
+    /// Send an HTTP GET probe to test if the port hosts a real website
+    HttpGetProbe,
+    /// Send a TLS ClientHello probe to test if port performs standard TLS negotiation
+    TlsClientHelloProbe,
+    /// Send random bytes to test if the service crashes, resets, or hangs
+    RandomGarbageProbe,
+}
+
+/// Policy configuration for DPI censorship middlebox emulation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CensorPolicy {
+    /// Block known VPN/P2P protocol signatures (WireGuard, BitTorrent, Raw QUIC)
+    pub block_known_signatures: bool,
+    /// Block high entropy (> 7.5) packets lacking standard TLS record framing (anti-Shadowsocks)
+    pub block_unstructured_high_entropy: bool,
+    /// Enforce standard bucket quantum lengths (flags unusual packet sizes)
+    pub enforce_packet_size_quantization: bool,
+    /// Minimum entropy threshold to trigger suspicion
+    pub high_entropy_threshold: f64,
+    /// Trigger active probing on unclassified or suspicious high-entropy traffic
+    pub active_probing_enabled: bool,
+}
+
+impl Default for CensorPolicy {
+    fn default() -> Self {
+        Self {
+            block_known_signatures: true,
+            block_unstructured_high_entropy: true,
+            enforce_packet_size_quantization: false,
+            high_entropy_threshold: 7.5,
+            active_probing_enabled: true,
+        }
+    }
+}
+
+/// DPI censorship emulator modeling state-of-the-art middlebox behavior
+/// (TSPU / GFW / Iranian firewalls) with passive inspection, entropy scoring,
+/// and active probe triggers.
+#[derive(Clone, Debug, Default)]
+pub struct DpiCensorEmulator {
+    policy: CensorPolicy,
+}
+
+impl DpiCensorEmulator {
+    /// Create emulator with a custom censorship policy.
+    pub fn new(policy: CensorPolicy) -> Self {
+        Self { policy }
+    }
+
+    /// Inspect an inbound or outbound packet and issue a censorship verdict.
+    pub fn inspect_packet(&self, packet: &[u8]) -> CensorVerdict {
+        if packet.is_empty() {
+            return CensorVerdict::Pass {
+                protocol: DetectedProtocol::UnknownPlaintext,
+                entropy: 0.0,
+            };
+        }
+
+        let entropy = calculate_shannon_entropy(packet);
+        let detected = DetectedProtocol::sniff(packet);
+
+        // 1. Signature checks
+        if self.policy.block_known_signatures {
+            match &detected {
+                DetectedProtocol::WireguardHandshake => {
+                    return CensorVerdict::Block {
+                        reason: "Signature match: WireGuard Handshake blocked by DPI".into(),
+                        detected,
+                        entropy,
+                    };
+                }
+                DetectedProtocol::BitTorrentP2p => {
+                    return CensorVerdict::Block {
+                        reason: "Signature match: BitTorrent P2P protocol blocked by DPI".into(),
+                        detected,
+                        entropy,
+                    };
+                }
+                DetectedProtocol::RawQuicInitial => {
+                    return CensorVerdict::Block {
+                        reason: "Signature match: Raw uncamouflaged QUIC protocol blocked by DPI".into(),
+                        detected,
+                        entropy,
+                    };
+                }
+                _ => {}
+            }
+        }
+
+        // 2. High-entropy unstructured checks (Anti-Shadowsocks / Anti-VMess rule used by TSPU/GFW)
+        if self.policy.block_unstructured_high_entropy {
+            if let DetectedProtocol::UnstructuredHighEntropy = detected {
+                if self.policy.active_probing_enabled {
+                    return CensorVerdict::TriggerActiveProbe {
+                        probe_type: ActiveProbeType::TlsClientHelloProbe,
+                        reason: format!(
+                            "Unstructured high entropy ({:.2} bits/byte) without TLS record header -> trigger active probe",
+                            entropy
+                        ),
+                    };
+                } else {
+                    return CensorVerdict::Block {
+                        reason: format!(
+                            "Unstructured high entropy ({:.2} bits/byte) blocked (suspected raw proxy)",
+                            entropy
+                        ),
+                        detected,
+                        entropy,
+                    };
+                }
+            }
+        }
+
+        // 3. TLS record validation (if it claims to be TLS)
+        if let DetectedProtocol::TlsRecord { record_len, .. } = detected {
+            // Check length consistency
+            if packet.len() != 5 + record_len {
+                return CensorVerdict::Block {
+                    reason: format!(
+                        "TLS record framing corrupted: declared {}, packet body {}",
+                        record_len,
+                        packet.len().saturating_sub(5)
+                    ),
+                    detected,
+                    entropy,
+                };
+            }
+
+            // Packet size quantization checks (if policy enforces discrete bucket sizing)
+            if self.policy.enforce_packet_size_quantization {
+                let valid_bucket = [517, 1029, 2053, 3077, 4101]
+                    .iter()
+                    .any(|&b| b == packet.len())
+                    || (packet.len() > 2053 && (packet.len() - 5) % 1024 == 0);
+                if !valid_bucket {
+                    return CensorVerdict::Block {
+                        reason: format!(
+                            "Packet length {} violates discrete bucket quantum policy",
+                            packet.len()
+                        ),
+                        detected,
+                        entropy,
+                    };
+                }
+            }
+
+            // Valid TLS passes!
+            return CensorVerdict::Pass {
+                protocol: detected,
+                entropy,
+            };
+        }
+
+        // 4. Default: pass plain traffic (or HTTP)
+        CensorVerdict::Pass {
+            protocol: detected,
+            entropy,
+        }
+    }
+}
+
+/// Result of evaluating an inbound connection or packet with active probe defense.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ProbeDefenseResult {
+    /// Inbound packet is authentic ADA DpiMorpher traffic; unmasked payload is returned.
+    ValidTraffic(Vec<u8>),
+    /// Inbound packet is an active probe or scanner; a decoy response should be returned.
+    DecoyResponse {
+        probe_detected: String,
+        response_bytes: Vec<u8>,
+    },
+    /// Packet is malformed or invalid non-probe traffic.
+    Drop {
+        reason: String,
+    },
+}
+
+/// Active probing defense system: deceives censor probes (GFW / TSPU active scanners)
+/// by providing realistic decoy web responses (Nginx / Cloudflare) or standard TLS Alerts
+/// rather than silently terminating connections or exposing proxy signatures.
+#[derive(Clone, Debug)]
+pub struct DpiProbeDefense {
+    morpher: DpiMorpher,
+    decoy_server_name: String,
+}
+
+impl DpiProbeDefense {
+    /// Create defense instance with a backing morpher and server identity header.
+    pub fn new(morpher: DpiMorpher, decoy_server_name: &str) -> Self {
+        Self {
+            morpher,
+            decoy_server_name: decoy_server_name.to_string(),
+        }
+    }
+
+    /// Process an inbound packet on a listening socket.
+    ///
+    /// If authentic DpiMorpher frame: unmasks and returns `ValidTraffic`.
+    /// If active scanner probe: generates a plausible decoy response.
+    pub fn process_inbound(&self, packet: &[u8]) -> ProbeDefenseResult {
+        // Attempt normal DpiMorpher unwrapping
+        if let Ok(unwrapped) = self.morpher.unwrap_bytes(packet) {
+            return ProbeDefenseResult::ValidTraffic(unwrapped);
+        }
+
+        // Not valid DpiMorpher traffic — check if it is an active probe!
+        let detected = DetectedProtocol::sniff(packet);
+        match detected {
+            DetectedProtocol::HttpPlaintext { method, path } => {
+                let decoy_http = self.generate_http_decoy(&method, &path);
+                ProbeDefenseResult::DecoyResponse {
+                    probe_detected: format!("HTTP {} {}", method, path),
+                    response_bytes: decoy_http,
+                }
+            }
+            DetectedProtocol::TlsRecord { .. }
+            | DetectedProtocol::UnknownPlaintext
+            | DetectedProtocol::UnstructuredHighEntropy => {
+                // If it looks like a TLS probe or unknown probe, return a realistic TLS Alert
+                // RFC 5246 / RFC 8446: Record Type 0x15 (Alert), Version 0x03 0x03, Length 0x00 0x02, Fatal (0x02), Handshake Failure (0x28)
+                let tls_alert_decoy = vec![0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x28];
+                ProbeDefenseResult::DecoyResponse {
+                    probe_detected: "Active TLS/Binary Probe".into(),
+                    response_bytes: tls_alert_decoy,
+                }
+            }
+            _ => ProbeDefenseResult::Drop {
+                reason: "Unrecognized non-probe traffic".into(),
+            },
+        }
+    }
+
+    /// Generates a realistic HTTP 200/404 response mimicking standard Nginx or Cloudflare web servers.
+    pub fn generate_http_decoy(&self, _method: &str, path: &str) -> Vec<u8> {
+        let (status_code, body) = if path == "/" || path == "/index.html" {
+            (
+                "200 OK",
+                "<!DOCTYPE html>\n<html>\n<head><title>Welcome</title></head>\n<body>\n<h1>Welcome to the server.</h1>\n<p>System operational.</p>\n</body>\n</html>\n",
+            )
+        } else {
+            (
+                "404 Not Found",
+                "<!DOCTYPE html>\n<html>\n<head><title>404 Not Found</title></head>\n<body>\n<center><h1>404 Not Found</h1></center>\n<hr><center>nginx</center>\n</body>\n</html>\n",
+            )
+        };
+
+        let response = format!(
+            "HTTP/1.1 {}\r\nServer: {}\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            status_code,
+            self.decoy_server_name,
+            body.len(),
+            body
+        );
+
+        response.into_bytes()
+    }
 }
 
 #[cfg(test)]
@@ -410,6 +829,155 @@ mod tests {
         wrapped[0] = 0x17;
         let truncated = &wrapped[..wrapped.len() - 10];
         assert!(morpher.unwrap_bytes(truncated).is_err());
+    }
+
+    #[test]
+    fn test_shannon_entropy() {
+        // Plain text has low entropy (< 5.0)
+        let plain = b"The quick brown fox jumps over the lazy dog repeatedly and consistently.";
+        let entropy_plain = calculate_shannon_entropy(plain);
+        assert!(entropy_plain < 5.0, "Plaintext entropy {} should be < 5.0", entropy_plain);
+
+        // Pseudorandom bytes have high entropy (~ 7.99 for 16KB)
+        let mut rand_buf = vec![0u8; 16384];
+        OsRng.fill_bytes(&mut rand_buf);
+        let entropy_rand = calculate_shannon_entropy(&rand_buf);
+        assert!(entropy_rand > 7.8, "Random entropy {} should be > 7.8", entropy_rand);
+    }
+
+    #[test]
+    fn test_dpi_censor_emulator_blocks_signatures() {
+        let emulator = DpiCensorEmulator::new(CensorPolicy::default());
+
+        // WireGuard Handshake (148 bytes, 0x01, 0x00, 0x00, 0x00)
+        let mut wg_packet = vec![0u8; 148];
+        wg_packet[0] = 0x01;
+        let v1 = emulator.inspect_packet(&wg_packet);
+        assert!(matches!(v1, CensorVerdict::Block { .. }));
+
+        // BitTorrent P2P handshake
+        let mut bt_packet = b"\x13BitTorrent protocol\x00\x00\x00\x00\x00\x00\x00\x00".to_vec();
+        bt_packet.extend_from_slice(&[42u8; 20]);
+        let v2 = emulator.inspect_packet(&bt_packet);
+        assert!(matches!(v2, CensorVerdict::Block { .. }));
+
+        // Raw QUIC Initial packet (0xC0 with version 1)
+        let mut quic_packet = vec![0u8; 1200];
+        quic_packet[0] = 0xC0;
+        quic_packet[1] = 0x00;
+        quic_packet[2] = 0x00;
+        quic_packet[3] = 0x00;
+        quic_packet[4] = 0x01; // QUIC v1
+        let v3 = emulator.inspect_packet(&quic_packet);
+        assert!(matches!(v3, CensorVerdict::Block { .. }));
+    }
+
+    #[test]
+    fn test_dpi_censor_emulator_blocks_unstructured_high_entropy() {
+        let emulator = DpiCensorEmulator::new(CensorPolicy {
+            active_probing_enabled: false,
+            ..Default::default()
+        });
+
+        // Unstructured random bytes without TLS header (Shadowsocks style)
+        let mut raw_proxy_packet = vec![0u8; 512];
+        OsRng.fill_bytes(&mut raw_proxy_packet);
+        // Ensure byte 0 is not a TLS record
+        raw_proxy_packet[0] = 0x88;
+
+        let verdict = emulator.inspect_packet(&raw_proxy_packet);
+        assert!(matches!(verdict, CensorVerdict::Block { .. }));
+    }
+
+    #[test]
+    fn test_dpi_censor_emulator_passes_dpi_morpher() {
+        let emulator = DpiCensorEmulator::new(CensorPolicy {
+            enforce_packet_size_quantization: true,
+            ..Default::default()
+        });
+        let morpher = DpiMorpher::new("ada-network-secret");
+
+        let secret_msg = b"Confidential mesh message across active DPI firewalls";
+        let morphed_packet = morpher.wrap_bytes(secret_msg).unwrap();
+
+        // Check entropy of morphed packet: must be high like real encrypted TLS (> 7.5 for 512-byte bucket)
+        let entropy = calculate_shannon_entropy(&morphed_packet);
+        assert!(entropy > 7.5, "DpiMorpher packet entropy {} must look like TLS ciphertext (> 7.5)", entropy);
+
+        let large_msg = vec![0x33u8; 1500];
+        let large_morphed = morpher.wrap_bytes(&large_msg).unwrap();
+        let large_entropy = calculate_shannon_entropy(&large_morphed);
+        assert!(large_entropy > 7.8, "Large DpiMorpher packet entropy {} must exceed 7.8", large_entropy);
+
+        // Morphed packet must pass censor inspection as a valid TLS record with discrete bucket size
+        let verdict = emulator.inspect_packet(&morphed_packet);
+        match verdict {
+            CensorVerdict::Pass { protocol, .. } => {
+                assert!(matches!(protocol, DetectedProtocol::TlsRecord { content_type: 0x17, .. }));
+            }
+            other => panic!("DpiMorpher packet was unexpectedly rejected by emulator: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_dpi_probe_defense_valid_traffic() {
+        let morpher = DpiMorpher::new("defense-passphrase");
+        let defense = DpiProbeDefense::new(morpher.clone(), "nginx/1.24.0");
+
+        let payload = b"Authentic encrypted ADA telemetry";
+        let frame = morpher.wrap_bytes(payload).unwrap();
+
+        let result = defense.process_inbound(&frame);
+        assert_eq!(result, ProbeDefenseResult::ValidTraffic(payload.to_vec()));
+    }
+
+    #[test]
+    fn test_dpi_probe_defense_http_decoy() {
+        let morpher = DpiMorpher::new("defense-passphrase");
+        let defense = DpiProbeDefense::new(morpher, "cloudflare");
+
+        // Active scanner sends HTTP GET probe
+        let http_probe = b"GET / HTTP/1.1\r\nHost: example.com\r\nUser-Agent: CensorScanner/1.0\r\n\r\n";
+        let result = defense.process_inbound(http_probe);
+
+        match result {
+            ProbeDefenseResult::DecoyResponse { response_bytes, .. } => {
+                let resp_str = String::from_utf8_lossy(&response_bytes);
+                assert!(resp_str.starts_with("HTTP/1.1 200 OK"));
+                assert!(resp_str.contains("Server: cloudflare"));
+                assert!(resp_str.contains("Welcome to the server."));
+            }
+            other => panic!("Expected DecoyResponse for HTTP probe, got {:?}", other),
+        }
+
+        // Active scanner probes nonexistent path -> 404
+        let http_probe_404 = b"GET /admin.php HTTP/1.1\r\nHost: example.com\r\n\r\n";
+        let result_404 = defense.process_inbound(http_probe_404);
+        match result_404 {
+            ProbeDefenseResult::DecoyResponse { response_bytes, .. } => {
+                let resp_str = String::from_utf8_lossy(&response_bytes);
+                assert!(resp_str.starts_with("HTTP/1.1 404 Not Found"));
+            }
+            other => panic!("Expected DecoyResponse for 404 HTTP probe, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_dpi_probe_defense_tls_alert_decoy() {
+        let morpher = DpiMorpher::new("defense-passphrase");
+        let defense = DpiProbeDefense::new(morpher, "nginx");
+
+        // Scanner sends TLS ClientHello probe or random binary probe
+        let raw_probe = [0x16, 0x03, 0x01, 0x00, 0x30, 0x01, 0x00, 0x00];
+        let result = defense.process_inbound(&raw_probe);
+
+        match result {
+            ProbeDefenseResult::DecoyResponse { response_bytes, .. } => {
+                // Must return standard RFC TLS Alert (Handshake Failure: 0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x28)
+                assert_eq!(response_bytes, vec![0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x28]);
+            }
+            other => panic!("Expected TLS Alert decoy response, got {:?}", other),
+        }
     }
 }
 

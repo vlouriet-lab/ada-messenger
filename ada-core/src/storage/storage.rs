@@ -53,10 +53,11 @@ pub(crate) fn blocking_op<F, T>(f: F) -> T
 where
     F: FnOnce() -> T,
 {
-    if tokio::runtime::Handle::try_current().is_ok() {
-        tokio::task::block_in_place(f)
-    } else {
-        f()
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(f)
+        }
+        _ => f(),
     }
 }
 
@@ -116,6 +117,22 @@ const MIGRATION_V3: &str = "
     CREATE INDEX IF NOT EXISTS idx_call_log_ended ON call_log(ended_at DESC);
 ";
 
+/// V4: persistent DTN Store-and-Forward bundles for offline radio mesh.
+const MIGRATION_V4: &str = "
+    CREATE TABLE IF NOT EXISTS dtn_bundles (
+        bundle_id       TEXT NOT NULL PRIMARY KEY,
+        recipient_id    BLOB NOT NULL,
+        msg_id          INTEGER NOT NULL,
+        payload         BLOB NOT NULL,
+        created_at_secs INTEGER NOT NULL,
+        ttl_secs        INTEGER NOT NULL,
+        priority        INTEGER NOT NULL DEFAULT 1,
+        retry_count     INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_dtn_recipient ON dtn_bundles(recipient_id);
+    CREATE INDEX IF NOT EXISTS idx_dtn_expiry ON dtn_bundles(created_at_secs, ttl_secs);
+";
+
 /// КРИТ-6: Applies all pending schema migrations to `conn`.
 ///
 /// Previously this block was duplicated verbatim in both `open()` and
@@ -143,6 +160,12 @@ fn apply_migrations(conn: &Connection) -> Result<()> {
             .map_err(|e| ADAError::Storage(format!("migration v3: {}", e)))?;
         conn.execute_batch("PRAGMA user_version = 3")
             .map_err(|e| ADAError::Storage(format!("set version 3: {}", e)))?;
+    }
+    if current_version < 4 {
+        conn.execute_batch(MIGRATION_V4)
+            .map_err(|e| ADAError::Storage(format!("migration v4: {}", e)))?;
+        conn.execute_batch("PRAGMA user_version = 4")
+            .map_err(|e| ADAError::Storage(format!("set version 4: {}", e)))?;
     }
     Ok(())
 }
@@ -423,6 +446,148 @@ impl KeyValueStore {
                 }
                 Err(_) => "[]".to_string(),
             }
+        })
+    }
+
+    /// Persist a DTN Store-and-Forward bundle in the encrypted database.
+    pub fn save_dtn_bundle(
+        &self,
+        bundle_id: &str,
+        recipient_id: &[u8; 32],
+        msg_id: u16,
+        payload: &[u8],
+        created_at_secs: u64,
+        ttl_secs: u64,
+        priority: i32,
+    ) -> Result<()> {
+        if !self.persistent {
+            return Ok(());
+        }
+        blocking_op(|| {
+            let conn = self
+                .writer
+                .lock()
+                .map_err(|_| ADAError::Storage("writer lock".into()))?;
+            conn.execute(
+                "INSERT OR REPLACE INTO dtn_bundles \
+                 (bundle_id, recipient_id, msg_id, payload, created_at_secs, ttl_secs, priority, retry_count) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)",
+                params![
+                    bundle_id,
+                    recipient_id.as_slice(),
+                    msg_id as i64,
+                    payload,
+                    created_at_secs as i64,
+                    ttl_secs as i64,
+                    priority,
+                ],
+            )
+            .map_err(|e| ADAError::Storage(format!("save_dtn_bundle: {e}")))?;
+            Ok(())
+        })
+    }
+}
+
+/// A persisted DTN (Delay-Tolerant Networking) bundle stored in SQLite.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PersistedDtnBundle {
+    pub bundle_id: String,
+    pub recipient_id: [u8; 32],
+    pub msg_id: u16,
+    pub payload: Vec<u8>,
+    pub created_at_secs: u64,
+    pub ttl_secs: u64,
+    pub priority: i32,
+    pub retry_count: i32,
+}
+
+impl KeyValueStore {
+    /// Load all persisted DTN bundles waiting for a specific recipient.
+    pub fn load_dtn_bundles_for_recipient(
+        &self,
+        recipient_id: &[u8; 32],
+    ) -> Result<Vec<PersistedDtnBundle>> {
+        if !self.persistent {
+            return Ok(Vec::new());
+        }
+        blocking_op(|| {
+            let conn = self
+                .reader
+                .lock()
+                .map_err(|_| ADAError::Storage("reader lock".into()))?;
+            let mut stmt = conn
+                .prepare(
+                    "SELECT bundle_id, recipient_id, msg_id, payload, created_at_secs, ttl_secs, priority, retry_count \
+                     FROM dtn_bundles WHERE recipient_id = ?1 ORDER BY priority DESC, created_at_secs ASC",
+                )
+                .map_err(|e| ADAError::Storage(format!("load_dtn_bundles: {e}")))?;
+
+            let rows = stmt
+                .query_map([recipient_id.as_slice()], |row| {
+                    let rec_vec: Vec<u8> = row.get(1)?;
+                    let mut rec_bytes = [0u8; 32];
+                    if rec_vec.len() == 32 {
+                        rec_bytes.copy_from_slice(&rec_vec);
+                    }
+                    Ok(PersistedDtnBundle {
+                        bundle_id: row.get(0)?,
+                        recipient_id: rec_bytes,
+                        msg_id: row.get::<_, i64>(2)? as u16,
+                        payload: row.get(3)?,
+                        created_at_secs: row.get::<_, i64>(4)? as u64,
+                        ttl_secs: row.get::<_, i64>(5)? as u64,
+                        priority: row.get(6)?,
+                        retry_count: row.get(7)?,
+                    })
+                })
+                .map_err(|e| ADAError::Storage(format!("query_map: {e}")))?;
+
+            let mut out = Vec::new();
+            for r in rows {
+                if let Ok(b) = r {
+                    out.push(b);
+                }
+            }
+            Ok(out)
+        })
+    }
+
+    /// Delete a drained DTN bundle from persistent storage.
+    pub fn delete_dtn_bundle(&self, bundle_id: &str) -> Result<()> {
+        if !self.persistent {
+            return Ok(());
+        }
+        blocking_op(|| {
+            let conn = self
+                .writer
+                .lock()
+                .map_err(|_| ADAError::Storage("writer lock".into()))?;
+            conn.execute(
+                "DELETE FROM dtn_bundles WHERE bundle_id = ?1",
+                params![bundle_id],
+            )
+            .map_err(|e| ADAError::Storage(format!("delete_dtn_bundle: {e}")))?;
+            Ok(())
+        })
+    }
+
+    /// Purge expired DTN bundles whose created_at_secs + ttl_secs < now_secs.
+    pub fn purge_expired_dtn_bundles(&self, now_secs: u64) -> Result<usize> {
+        if !self.persistent {
+            return Ok(0);
+        }
+        blocking_op(|| {
+            let conn = self
+                .writer
+                .lock()
+                .map_err(|_| ADAError::Storage("writer lock".into()))?;
+            let count = conn
+                .execute(
+                    "DELETE FROM dtn_bundles WHERE (created_at_secs + ttl_secs) < ?1",
+                    params![now_secs as i64],
+                )
+                .map_err(|e| ADAError::Storage(format!("purge_expired_dtn: {e}")))?;
+            Ok(count)
         })
     }
 

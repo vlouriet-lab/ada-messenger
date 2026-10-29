@@ -222,6 +222,7 @@ impl SessionManager {
                 .ok_or_else(|| ADAError::Message("session disappeared after insert".into()))?;
             let padded = pad_to_bucket(plaintext);
             let ratchet_msg = session.ratchet.encrypt(&padded)?;
+            session.handshake_complete = true;
             let ratchet_bytes =
                 bincode::serialize(&ratchet_msg).map_err(ADAError::Serialization)?;
 
@@ -393,6 +394,7 @@ impl SessionManager {
                 .ratchet
                 .decrypt(&ratchet_msg)
                 .and_then(|b| unpad_from_bucket(&b))?;
+            session.handshake_complete = true;
             // Persist ratchet state after successful X3DH-init decrypt.
             if let Some(store) = &self.storage {
                 if let Err(e) = store.save_ratchet_state(&wire.sender, &session.ratchet) {
@@ -423,6 +425,7 @@ impl SessionManager {
             .ratchet
             .decrypt(&ratchet_msg)
             .and_then(|b| unpad_from_bucket(&b))?;
+        session.handshake_complete = true;
         // Persist ratchet state after successful decrypt.
         if let Some(store) = &self.storage {
             if let Err(e) = store.save_ratchet_state(&wire.sender, &session.ratchet) {

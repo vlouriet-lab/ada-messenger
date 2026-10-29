@@ -12,6 +12,22 @@ internal object DesktopSyncAuth {
     private const val NONCE_BYTES = 16
     private val secureRandom = SecureRandom()
 
+    fun computeHeaderMap(
+        linkKeyHex: String,
+        method: String,
+        path: String,
+        body: String,
+    ): Map<String, String> {
+        val nonce = ByteArray(NONCE_BYTES).also(secureRandom::nextBytes)
+        val nonceB64 = base64UrlEncode(nonce)
+        val macB64 = base64UrlEncode(computeMac(linkKeyHex, method, path, nonceB64, body))
+        return mapOf(
+            "Authorization" to AUTH_SCHEME,
+            "X-Ada-Sync-Nonce" to nonceB64,
+            "X-Ada-Sync-Mac" to macB64,
+        )
+    }
+
     fun applyHeaders(
         connection: HttpURLConnection,
         linkKeyHex: String,
@@ -19,12 +35,10 @@ internal object DesktopSyncAuth {
         path: String,
         body: String,
     ) {
-        val nonce = ByteArray(NONCE_BYTES).also(secureRandom::nextBytes)
-        val nonceB64 = base64UrlEncode(nonce)
-        val macB64 = base64UrlEncode(computeMac(linkKeyHex, method, path, nonceB64, body))
-        connection.setRequestProperty("Authorization", AUTH_SCHEME)
-        connection.setRequestProperty("X-Ada-Sync-Nonce", nonceB64)
-        connection.setRequestProperty("X-Ada-Sync-Mac", macB64)
+        val headers = computeHeaderMap(linkKeyHex, method, path, body)
+        for ((k, v) in headers) {
+            connection.setRequestProperty(k, v)
+        }
     }
 
     private fun computeMac(

@@ -1,4 +1,4 @@
-﻿package com.ada.messenger
+package com.ada.messenger
 
 import android.Manifest
 import android.app.Activity
@@ -84,6 +84,7 @@ class MainActivity : AppCompatActivity() {
         const val EXTRA_CALL_ID        = "ada_call_id"
         const val EXTRA_CALL_PEER      = "ada_call_peer"
         const val EXTRA_CALL_VIDEO     = "ada_call_video"
+        const val EXTRA_ANSWER_NOW     = "ada_answer_now"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -338,12 +339,14 @@ class MainActivity : AppCompatActivity() {
         // Incoming call deep-link (from background notification)
         val openCall = intent?.getBooleanExtra(EXTRA_OPEN_CALL, false) ?: false
         if (openCall) {
-            val callId  = intent?.getStringExtra(EXTRA_CALL_ID) ?: ""
-            val peer    = intent?.getStringExtra(EXTRA_CALL_PEER) ?: ""
-            val video   = intent?.getBooleanExtra(EXTRA_CALL_VIDEO, false) ?: false
-            Log.i(TAG, "deep-link incoming call: id=$callId peer=${peer.take(12)} video=$video")
-            sharedViewModel.openFromCallNotification(callId, peer, video)
+            val callId    = intent?.getStringExtra(EXTRA_CALL_ID) ?: ""
+            val peer      = intent?.getStringExtra(EXTRA_CALL_PEER) ?: ""
+            val video     = intent?.getBooleanExtra(EXTRA_CALL_VIDEO, false) ?: false
+            val answerNow = intent?.getBooleanExtra(EXTRA_ANSWER_NOW, false) ?: false
+            Log.i(TAG, "deep-link incoming call: id=$callId peer=${peer.take(12)} video=$video answerNow=$answerNow")
+            sharedViewModel.openFromCallNotification(callId, peer, video, answerNow)
             intent?.removeExtra(EXTRA_OPEN_CALL)
+            intent?.removeExtra(EXTRA_ANSWER_NOW)
         }
     }
 }

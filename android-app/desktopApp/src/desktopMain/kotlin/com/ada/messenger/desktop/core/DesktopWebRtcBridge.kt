@@ -9,6 +9,7 @@ import dev.onvoid.webrtc.RTCIceCandidate
 import dev.onvoid.webrtc.RTCIceConnectionState
 import dev.onvoid.webrtc.RTCIceGatheringState
 import dev.onvoid.webrtc.RTCIceServer
+import dev.onvoid.webrtc.RTCIceTransportPolicy
 import dev.onvoid.webrtc.RTCOfferOptions
 import dev.onvoid.webrtc.RTCPeerConnection
 import dev.onvoid.webrtc.RTCPeerConnectionState
@@ -113,7 +114,10 @@ class DesktopWebRtcBridge(
     private var localDesktopSource: VideoDesktopSource? = null
     private var localVideoTrack: VideoTrack? = null
     private var remoteVideoTrack: VideoTrack? = null
-    private var currentSession: ActiveSession? = null
+    private val participantSessions = LinkedHashMap<String, ActiveSession>()
+    private val peerIdByCallId = HashMap<String, String>()
+    private val currentSession: ActiveSession?
+        get() = synchronized(sessionLock) { participantSessions.values.firstOrNull() }
     private var videoUiState = DesktopVideoCallUiState()
     private var lastLocalFrameUpdateNs = 0L
     private var lastRemoteFrameUpdateNs = 0L
@@ -211,7 +215,7 @@ class DesktopWebRtcBridge(
     suspend fun startOutgoingCall(peerIdB64: String, hasVideo: Boolean): DesktopCallStartResult {
         return try {
             logInfo("desktop outgoing call start peer=${shortPeerId(peerIdB64)} video=$hasVideo")
-            onCallEnded()
+            onCallEnded(peerIdB64 = peerIdB64)
             val session = prepareSession(peerIdB64, hasVideo)
             attachLocalTracks(session)
             val offerSdp = createOffer(session, iceRestart = false)
@@ -225,18 +229,17 @@ class DesktopWebRtcBridge(
             val callId = callStart.callId
 
             if (callId.isNullOrBlank()) {
-                onCallEnded()
+                onCallEnded(peerIdB64 = peerIdB64)
                 logWarn("desktop outgoing call start rejected peer=${shortPeerId(peerIdB64)} reason=${callStart.error}")
                 DesktopCallStartResult(
                     error = callStart.error ?: "Не удалось отправить приглашение на звонок.",
                 )
             } else {
                 synchronized(sessionLock) {
-                    currentSession?.takeIf { it.peerId == peerIdB64 }?.apply {
-                        this.callId = callId
-                        this.hasVideo = hasVideo
-                        this.isOfferer = true
-                    }
+                    session.callId = callId
+                    session.hasVideo = hasVideo
+                    session.isOfferer = true
+                    peerIdByCallId[callId] = peerIdB64
                 }
                 flushBufferedLocalIce(callId, peerIdB64)
                 ensureWebRtcProxyRunning(callId, peerIdB64, hasVideo)
@@ -263,23 +266,20 @@ class DesktopWebRtcBridge(
                 logInfo(
                     "desktop incoming answer start id=$callIdHex peer=${shortPeerId(peerIdB64)} video=$hasVideo offerLen=${offerSdp.length}",
                 )
-                onCallEnded()
+                onCallEnded(peerIdB64 = peerIdB64)
                 val session = prepareSession(peerIdB64, hasVideo)
                 synchronized(sessionLock) {
-                    currentSession?.takeIf { it.peerId == peerIdB64 }?.apply {
-                        callId = callIdHex
-                        this.hasVideo = hasVideo
-                        isOfferer = false
-                    }
+                    session.callId = callIdHex
+                    session.hasVideo = hasVideo
+                    session.isOfferer = false
+                    peerIdByCallId[callIdHex] = peerIdB64
                 }
 
                 setRemoteDescription(session.peerConnection, RTCSessionDescription(RTCSdpType.OFFER, offerSdp))
                 synchronized(sessionLock) {
-                    currentSession?.takeIf { it.peerId == peerIdB64 }?.apply {
-                        remoteDescriptionSet = true
-                        pendingRemoteIceCandidates.forEach(session.peerConnection::addIceCandidate)
-                        pendingRemoteIceCandidates.clear()
-                    }
+                    session.remoteDescriptionSet = true
+                    session.pendingRemoteIceCandidates.forEach(session.peerConnection::addIceCandidate)
+                    session.pendingRemoteIceCandidates.clear()
                 }
 
                 attachLocalTracks(session)
@@ -313,11 +313,9 @@ class DesktopWebRtcBridge(
         runCatching {
             setRemoteDescription(session.peerConnection, RTCSessionDescription(RTCSdpType.ANSWER, answerSdp))
             synchronized(sessionLock) {
-                currentSession?.takeIf { it.callId == callIdHex }?.apply {
-                    remoteDescriptionSet = true
-                    pendingRemoteIceCandidates.forEach(session.peerConnection::addIceCandidate)
-                    pendingRemoteIceCandidates.clear()
-                }
+                session.remoteDescriptionSet = true
+                session.pendingRemoteIceCandidates.forEach(session.peerConnection::addIceCandidate)
+                session.pendingRemoteIceCandidates.clear()
             }
         }.onFailure { error ->
             logWarn("desktop remote answer apply failed id=$callIdHex", error)
@@ -336,12 +334,10 @@ class DesktopWebRtcBridge(
         val iceCandidate = RTCIceCandidate(sdpMid ?: "0", sdpMLineIndex, candidate)
         val session = session(callIdHex = callIdHex, peerIdB64 = peerIdB64) ?: return
         synchronized(sessionLock) {
-            currentSession?.takeIf { it.peerId == session.peerId }?.apply {
-                if (remoteDescriptionSet) {
-                    peerConnection.addIceCandidate(iceCandidate)
-                } else {
-                    pendingRemoteIceCandidates.add(iceCandidate)
-                }
+            if (session.remoteDescriptionSet) {
+                session.peerConnection.addIceCandidate(iceCandidate)
+            } else {
+                session.pendingRemoteIceCandidates.add(iceCandidate)
             }
         }
     }
@@ -373,31 +369,41 @@ class DesktopWebRtcBridge(
     }
 
     fun onCallEnded(callIdHex: String? = null, peerIdB64: String? = null) {
-        val sessionToRelease = synchronized(sessionLock) {
-            currentSession?.takeIf {
-                (callIdHex == null || it.callId == callIdHex) &&
-                    (peerIdB64 == null || it.peerId == peerIdB64)
-            }?.also {
-                currentSession = null
-            }
-        } ?: run {
+        val sessionsToRelease = synchronized(sessionLock) {
             if (callIdHex == null && peerIdB64 == null) {
-                releaseSharedMedia()
+                val all = participantSessions.values.toList()
+                participantSessions.clear()
+                peerIdByCallId.clear()
+                all
+            } else {
+                val targetPeerId = peerIdB64 ?: callIdHex?.let { peerIdByCallId[it] }
+                val session = targetPeerId?.let { participantSessions.remove(it) }
+                    ?: participantSessions.values.firstOrNull { it.callId == callIdHex }?.also {
+                        participantSessions.remove(it.peerId)
+                    }
+                session?.callId?.let { peerIdByCallId.remove(it) }
+                listOfNotNull(session)
             }
-            return
         }
 
-        runCatching {
-            requireCoreOrNull()?.stopWebRtcProxy(sessionToRelease.peerId)
+        sessionsToRelease.forEach { sessionToRelease ->
+            runCatching {
+                requireCoreOrNull()?.stopWebRtcProxy(sessionToRelease.peerId)
+            }
+            runCatching {
+                remoteVideoTrack?.removeSink(remoteVideoSink)
+                remoteVideoTrack = null
+                sessionToRelease.peerConnection.close()
+            }.onFailure { error ->
+                logWarn("desktop peer connection cleanup failed for peer=${shortPeerId(sessionToRelease.peerId)}", error)
+            }
         }
-        runCatching {
-            remoteVideoTrack?.removeSink(remoteVideoSink)
-            remoteVideoTrack = null
-            sessionToRelease.peerConnection.close()
-        }.onFailure { error ->
-            logWarn("desktop peer connection cleanup failed", error)
+
+        if (participantSessions.isEmpty()) {
+            releaseSharedMedia()
+        } else {
+            updateAllAudioBitrates()
         }
-        releaseSharedMedia()
     }
 
     private fun prepareSession(peerIdB64: String, hasVideo: Boolean): ActiveSession {
@@ -410,8 +416,9 @@ class DesktopWebRtcBridge(
             hasVideo = hasVideo,
         ).also { session ->
             synchronized(sessionLock) {
-                currentSession = session
+                participantSessions[peerIdB64] = session
             }
+            updateAllAudioBitrates()
         }
     }
 
@@ -440,6 +447,11 @@ class DesktopWebRtcBridge(
 
     private fun createPeerConnection(peerIdB64: String): RTCPeerConnection {
         val config = RTCConfiguration().apply {
+            val directAllowed = requireCoreOrNull()?.isPeerDirectP2PAllowed(peerIdB64) ?: false
+            if (!directAllowed) {
+                iceTransportPolicy = RTCIceTransportPolicy.RELAY
+                logDebug("desktop WebRTC enforcing Relay-Only for peer=${shortPeerId(peerIdB64)}")
+            }
             iceServers.addAll(STUN_SERVERS.map { url ->
                 RTCIceServer().apply { urls.add(url) }
             })
@@ -458,7 +470,7 @@ class DesktopWebRtcBridge(
                 val callId = session.callId
                 if (callId.isNullOrBlank()) {
                     synchronized(sessionLock) {
-                        currentSession?.takeIf { it.peerId == peerIdB64 }?.pendingLocalIceCandidates?.add(candidate)
+                        session.pendingLocalIceCandidates.add(candidate)
                     }
                     logDebug("desktop local ICE buffered peer=${shortPeerId(peerIdB64)} mid=${candidate.sdpMid} mline=${candidate.sdpMLineIndex}")
                     return
@@ -590,11 +602,62 @@ class DesktopWebRtcBridge(
         session.audioSender = localAudioTrack?.let { session.peerConnection.addTrack(it, listOf("stream0")) }
         if (session.hasVideo) {
             session.videoSender = localVideoTrack?.let { session.peerConnection.addTrack(it, listOf("stream0")) }
+            applyVideoEncoderSettings(session)
         }
         session.localTracksAttached = true
+        applyAudioEncoderSettings(session, currentParticipantCount())
         logInfo(
             "desktop local tracks attached peer=${shortPeerId(session.peerId)} audio=${session.audioSender != null} video=${session.videoSender != null}",
         )
+    }
+
+    private fun currentParticipantCount(): Int = synchronized(sessionLock) {
+        participantSessions.size.coerceAtLeast(1)
+    }
+
+    private fun updateAllAudioBitrates() {
+        val count = currentParticipantCount()
+        synchronized(sessionLock) {
+            for (session in participantSessions.values) {
+                applyAudioEncoderSettings(session, count)
+            }
+        }
+    }
+
+    private fun applyAudioEncoderSettings(session: ActiveSession, participantCount: Int) {
+        try {
+            val sender = session.audioSender ?: return
+            val params = sender.parameters ?: return
+            val encodings = params.encodings
+            if (!encodings.isNullOrEmpty()) {
+                val targetBitrateBps = when {
+                    participantCount <= 2 -> 32_000
+                    participantCount <= 4 -> 24_000
+                    else -> 16_000
+                }
+                encodings[0].maxBitrate = targetBitrateBps
+                sender.parameters = params
+                logInfo("desktop audio bitrate set to $targetBitrateBps bps peer=${shortPeerId(session.peerId)} participants=$participantCount")
+            }
+        } catch (e: Exception) {
+            logWarn("applyAudioEncoderSettings failed for peer=${shortPeerId(session.peerId)}: ${e.message}")
+        }
+    }
+
+    private fun applyVideoEncoderSettings(session: ActiveSession) {
+        try {
+            val sender = session.videoSender ?: return
+            val params = sender.parameters ?: return
+            val encodings = params.encodings
+            if (!encodings.isNullOrEmpty()) {
+                encodings[0].maxBitrate = 2_000_000
+                encodings[0].minBitrate = 400_000
+                sender.parameters = params
+                logInfo("desktop video encoder settings applied peer=${shortPeerId(session.peerId)} (min=400k max=2M)")
+            }
+        } catch (e: Exception) {
+            logWarn("applyVideoEncoderSettings failed for peer=${shortPeerId(session.peerId)}: ${e.message}")
+        }
     }
 
     private suspend fun createOffer(session: ActiveSession, iceRestart: Boolean): String =
@@ -698,11 +761,10 @@ class DesktopWebRtcBridge(
 
     private fun flushBufferedLocalIce(callIdHex: String, peerIdB64: String) {
         val candidates = synchronized(sessionLock) {
-            currentSession?.takeIf { it.callId == callIdHex && it.peerId == peerIdB64 }
-                ?.pendingLocalIceCandidates
-                ?.toList()
-                ?.also { currentSession?.pendingLocalIceCandidates?.clear() }
-                .orEmpty()
+            val s = session(callIdHex = callIdHex, peerIdB64 = peerIdB64)
+            val list = s?.pendingLocalIceCandidates?.toList().orEmpty()
+            s?.pendingLocalIceCandidates?.clear()
+            list
         }
         if (candidates.isEmpty()) return
 
@@ -1150,9 +1212,13 @@ class DesktopWebRtcBridge(
     }
 
     private fun session(callIdHex: String? = null, peerIdB64: String? = null): ActiveSession? = synchronized(sessionLock) {
-        currentSession?.takeIf {
-            (callIdHex == null || it.callId == callIdHex) &&
-                (peerIdB64 == null || it.peerId == peerIdB64)
+        if (peerIdB64 != null) {
+            participantSessions[peerIdB64]
+        } else if (callIdHex != null) {
+            peerIdByCallId[callIdHex]?.let { participantSessions[it] }
+                ?: participantSessions.values.firstOrNull { it.callId == callIdHex }
+        } else {
+            participantSessions.values.firstOrNull()
         }
     }
 

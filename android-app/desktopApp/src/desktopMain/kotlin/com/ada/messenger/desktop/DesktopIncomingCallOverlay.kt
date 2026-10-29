@@ -7,6 +7,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -243,8 +244,7 @@ private fun IncomingCallActionButton(
                 .clip(CircleShape)
                 .background(containerColor)
                 .border(1.dp, Color(0x33FFFFFF), CircleShape)
-                .background(containerColor)
-                .padding(0.dp),
+                .clickable(onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
             Icon(

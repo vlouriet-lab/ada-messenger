@@ -769,6 +769,90 @@ pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nati
     Java_com_ada_messenger_core_AdaCore_nativeHangupGroupCallRoom(env, obj, handle, session_id_hex)
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativeCallInGroupRoom(
+    env: JNIEnv,
+    obj: JObject,
+    handle: jlong,
+    peer_id_b64: JString,
+    offer_sdp: JString,
+    group_id_hex: JString,
+    session_id_hex: JString,
+    has_video: jint,
+) -> jstring {
+    Java_com_ada_messenger_core_AdaCore_nativeCallInGroupRoom(
+        env,
+        obj,
+        handle,
+        peer_id_b64,
+        offer_sdp,
+        group_id_hex,
+        session_id_hex,
+        has_video,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativeStartGroupCall(
+    env: JNIEnv,
+    obj: JObject,
+    handle: jlong,
+    group_id_hex: JString,
+    offer_sdp: JString,
+    has_video: jint,
+) -> jstring {
+    Java_com_ada_messenger_core_AdaCore_nativeStartGroupCall(
+        env,
+        obj,
+        handle,
+        group_id_hex,
+        offer_sdp,
+        has_video,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativeJoinGroupCall(
+    env: JNIEnv,
+    obj: JObject,
+    handle: jlong,
+    group_id_hex: JString,
+    session_id_hex: JString,
+    offer_sdp: JString,
+    has_video: jint,
+) -> jstring {
+    Java_com_ada_messenger_core_AdaCore_nativeJoinGroupCall(
+        env,
+        obj,
+        handle,
+        group_id_hex,
+        session_id_hex,
+        offer_sdp,
+        has_video,
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativeAttachCallToGroupRoom(
+    env: JNIEnv,
+    obj: JObject,
+    handle: jlong,
+    call_id_hex: JString,
+    group_id_hex: JString,
+    session_id_hex: JString,
+    has_video: jint,
+) -> jint {
+    Java_com_ada_messenger_core_AdaCore_nativeAttachCallToGroupRoom(
+        env,
+        obj,
+        handle,
+        call_id_hex,
+        group_id_hex,
+        session_id_hex,
+        has_video,
+    )
+}
+
 /// Called by the JVM when the native library is loaded (`System.loadLibrary`).
 /// Initialises android_logger so all `tracing` / `log` records from Rust are
 /// routed to logcat under the tag "ada_core".  Without this, every Rust log
@@ -999,6 +1083,64 @@ pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nati
     envelope: JByteArray,
 ) -> jni::sys::jbyteArray {
     Java_com_ada_messenger_core_AdaCore_nativePinVaultUnseal(env, class, pin, anchor, envelope)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativeDpapiProtect(
+    env: JNIEnv,
+    _class: JClass,
+    data: JByteArray,
+) -> jni::sys::jbyteArray {
+    let data_u8 = match env.convert_byte_array(&data) {
+        Ok(b) => b,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let mut out_len = 0usize;
+    let ptr = crate::ffi::ada_dpapi_protect(
+        data_u8.as_ptr(),
+        data_u8.len(),
+        &mut out_len,
+    );
+    if ptr.is_null() || out_len == 0 {
+        return std::ptr::null_mut();
+    }
+    let slice = std::slice::from_raw_parts(ptr, out_len);
+    let result = env.byte_array_from_slice(slice);
+    crate::ffi::ada_bytes_free(ptr, out_len);
+
+    match result {
+        Ok(arr) => arr.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_ada_messenger_desktop_core_DesktopAdaCore_nativeDpapiUnprotect(
+    env: JNIEnv,
+    _class: JClass,
+    data: JByteArray,
+) -> jni::sys::jbyteArray {
+    let data_u8 = match env.convert_byte_array(&data) {
+        Ok(b) => b,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let mut out_len = 0usize;
+    let ptr = crate::ffi::ada_dpapi_unprotect(
+        data_u8.as_ptr(),
+        data_u8.len(),
+        &mut out_len,
+    );
+    if ptr.is_null() || out_len == 0 {
+        return std::ptr::null_mut();
+    }
+    let slice = std::slice::from_raw_parts(ptr, out_len);
+    let result = env.byte_array_from_slice(slice);
+    crate::ffi::ada_bytes_free(ptr, out_len);
+
+    match result {
+        Ok(arr) => arr.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
 }
 
 
@@ -1300,7 +1442,7 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeMeshRadioPrep
 
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetPeerId(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _obj: JObject,
     handle: jlong,
 ) -> jstring {
@@ -1319,7 +1461,7 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetPeerId(
 
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetDisplayName(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _obj: JObject,
     handle: jlong,
 ) -> jstring {
@@ -1340,7 +1482,7 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetDisplayNam
 /// Returns null on failure.  The JVM side must call this from a worker thread.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeExportIdentityJson(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _obj: JObject,
     handle: jlong,
 ) -> jstring {
@@ -1367,7 +1509,7 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeExportIdentit
 /// Returns null on failure.  Must be called from a worker thread.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeExportSnapshot(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _obj: JObject,
     handle: jlong,
 ) -> jstring {
@@ -1421,7 +1563,7 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeImportSnapsho
 /// Returns the 64-char hex link key or null if not paired.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetLinkKeyHex(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _obj: JObject,
     handle: jlong,
 ) -> jstring {
@@ -1466,7 +1608,7 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeStoreLinkSync
 /// Get the stored sync URL (or null).
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetLinkedDeviceSyncUrl(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _obj: JObject,
     handle: jlong,
 ) -> jstring {
@@ -1840,7 +1982,7 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeSendReaction(
 /// Returns JSON array of conversations. Caller receives a Kotlin String.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetConversationsJson(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _obj: JObject,
     handle: jlong,
 ) -> jstring {
@@ -1935,7 +2077,7 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetMessagesJs
 /// Poll one pending event as JSON. Returns null string if no events.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativePollEventJson(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _obj: JObject,
     handle: jlong,
     timeout_ms: jint,
@@ -2370,7 +2512,7 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeCallVideo(
 /// Returns JSON array of active calls.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetActiveCallsJson(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _obj: JObject,
     handle: jlong,
 ) -> jstring {
@@ -2393,7 +2535,7 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetActiveCall
 /// Returns JSON describing whether realtime calls can be started now.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetCallAvailabilityJson(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _obj: JObject,
     handle: jlong,
 ) -> jstring {
@@ -2418,7 +2560,7 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetCallAvaila
 /// Returns JSON array of call history (most-recent first).
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetCallHistoryJson(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _obj: JObject,
     handle: jlong,
     limit: jint,
@@ -2745,7 +2887,7 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeSendFileFromP
 /// Returns JSON array of active transfers.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetTransfersJson(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _obj: JObject,
     handle: jlong,
 ) -> jstring {
@@ -2938,7 +3080,7 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeTakeLastError
 /// Returns JSON with bridge list and current mode.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetBridgeStatusJson(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _obj: JObject,
     handle: jlong,
 ) -> jstring {
@@ -2962,7 +3104,7 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetBridgeStat
 /// Does not block on async locks — safe to call frequently.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetMetricsSnapshot(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _obj: JObject,
     handle: jlong,
 ) -> jstring {
@@ -2985,7 +3127,7 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetMetricsSna
 /// Returns JSON `{"level":"None"|...}` based on a fast connectivity probe.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeDetectCensorshipJson(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _obj: JObject,
     handle: jlong,
 ) -> jstring {
@@ -3163,7 +3305,7 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeCreateFromPat
 /// Returns JNI_TRUE (1) if match, JNI_FALSE (0) otherwise.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeVerifyPattern(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _obj: JObject,
     handle: jlong,
     cells: jni::objects::JByteArray,
@@ -3184,7 +3326,7 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeVerifyPattern
 /// Returns a Kotlin String or null on error.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetContactCardJson(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _obj: JObject,
     handle: jlong,
 ) -> jstring {
@@ -3263,7 +3405,7 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetContactSec
 /// Retrieve security and verification details for all contacts as JSON array.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeListContactSecurityJson(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _obj: JObject,
     handle: jlong,
 ) -> jstring {
@@ -3751,7 +3893,7 @@ pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeLeaveGroup(
 /// Returns JSON array of all groups. Caller receives a Kotlin String.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_ada_messenger_core_AdaCore_nativeGetGroupsJson(
-    mut env: JNIEnv,
+    env: JNIEnv,
     _obj: JObject,
     handle: jlong,
 ) -> jstring {
